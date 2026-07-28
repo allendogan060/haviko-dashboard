@@ -29,7 +29,7 @@ const app = {
   updatedAt: null,
   route: "overview",
   reservationDate: localDateInput(new Date()),
-  tableArea: "Alle",
+  tableArea: "",
   orderCart: [],
   orderTableID: null,
   reviews: [],
@@ -741,6 +741,15 @@ function setSyncState(kind, text) {
   element.querySelector("span").textContent = text;
 }
 
+function blockOperationalAction() {
+  toast(
+    "Nur in der App",
+    "Bestellen, Platzieren, Bezahlen und Abschließen sind ausschließlich in der Haviko-App möglich. Das Web-Dashboard ist zur Ansicht und Verwaltung gedacht.",
+    "error"
+  );
+  return true;
+}
+
 function toast(title, message, type = "success") {
   const item = document.createElement("div");
   item.className = "toast";
@@ -997,11 +1006,9 @@ function upcomingReservationForTable(tableID, date = new Date()) {
 }
 
 function renderTables() {
-  const areas = ["Alle", ...new Set(app.data.tables.map((table) => table.area).filter(Boolean))];
-  if (!areas.includes(app.tableArea)) app.tableArea = "Alle";
-  const tables = app.data.tables.filter(
-    (table) => app.tableArea === "Alle" || table.area === app.tableArea
-  );
+  const areas = [...new Set(app.data.tables.map((table) => table.area).filter(Boolean))];
+  if (!areas.includes(app.tableArea)) app.tableArea = areas[0] || "";
+  const tables = app.data.tables.filter((table) => table.area === app.tableArea);
   $("view").innerHTML = `
     <div class="page-tools">
       <div><h2>Tischübersicht</h2><p>Belegung, Reservierungen und laufende Umsätze.</p></div>
@@ -1066,12 +1073,6 @@ function renderOrders() {
 }
 
 function ticketCard(ticket) {
-  const nextStatus =
-    ticket.status === "Neu" ? "In Zubereitung" :
-    ticket.status === "In Zubereitung" ? "Fertig" : "Serviert";
-  const label =
-    nextStatus === "In Zubereitung" ? "Annehmen" :
-    nextStatus === "Fertig" ? "Fertig" : "Abgeholt";
   return `
     <article class="ticket-card" style="--ticket-color:${ticketColor(ticket.status)}">
       <header>
@@ -1083,10 +1084,6 @@ function ticketCard(ticket) {
           (ticket.items || []).map((item) => `<li>${escapeHTML(item)}</li>`).join("")}
       </ul>
       ${ticket.isReorder ? `<span class="badge orange">Nachbestellung</span>` : ""}
-      <div class="ticket-actions">
-        ${ticket.status !== "Neu" ? `<button class="secondary" type="button" data-ticket-back="${ticket.id}">Zurück</button>` : ""}
-        <button class="primary" type="button" data-ticket-next="${ticket.id}" data-next-status="${nextStatus}">${label}</button>
-      </div>
     </article>
   `;
 }
@@ -1231,6 +1228,13 @@ async function deleteCategory(name) {
 }
 
 function renderTeam() {
+  const seenNames = new Set();
+  const visibleTeam = app.data.team.filter((member) => {
+    const key = member.name.trim().toLowerCase();
+    if (seenNames.has(key)) return false;
+    seenNames.add(key);
+    return true;
+  });
   $("view").innerHTML = `
     <div class="page-tools">
       <div><h2>Team & Geräte</h2><p>Persönliche Zugänge und fest zugewiesene Betriebsgeräte getrennt verwalten.</p></div>
@@ -1244,7 +1248,7 @@ function renderTeam() {
       <table class="data-table">
         <thead><tr><th>Name und Anmeldung</th><th>Rolle</th><th>Telefon</th><th></th></tr></thead>
         <tbody>
-          ${app.data.team.map((member) => `
+          ${visibleTeam.map((member) => `
             <tr>
               <td><strong>${escapeHTML(member.name)}</strong></td>
               <td>${statusBadge(member.role)}</td>
@@ -1857,23 +1861,17 @@ function openTable(tableID) {
       <div class="review-block">
         <strong>${escapeHTML(reservation.name)}</strong>
         <p>${Number(reservation.guests)} Personen · ${formatDate(reservation.time)}</p>
-        ${reservation.status === "Geplant" ? `<button class="primary full" type="button" data-modal-action="place-reservation" data-id="${reservation.id}">Reservierung platzieren</button>` : ""}
       </div>` : ""}
-    ${["frei", "reserviert"].includes(table.status) ? `
-      <label class="field"><span>Walk-in Gäste</span><input id="walkin-guests" type="number" min="1" max="${table.capacity}" value="${Math.min(2, table.capacity)}"></label>
-      <button class="primary full" type="button" data-modal-action="walkin" data-id="${table.id}">Walk-in platzieren</button>
-    ` : ""}
     ${table.status === "besetzt" ? `
       <div class="review-block"><strong>Laufender Umsatz: ${formatCurrency(total)}</strong></div>
-      <button class="primary full" type="button" data-modal-action="order" data-id="${table.id}">Bestellung aufnehmen</button>
-      <button class="danger full" type="button" data-modal-action="end-visit" data-id="${table.id}">Besuch beenden</button>
     ` : ""}
-    ${table.status === "reinigen" ? `<button class="primary full" type="button" data-modal-action="cleaned" data-id="${table.id}">Als gereinigt markieren</button>` : ""}
+    <p class="modal-note">Platzieren, Bestellen, Bezahlen und Abschließen sind ausschließlich in der Haviko-App möglich. Das Web-Dashboard zeigt den Status nur an.</p>
   `;
   openModal({ eyebrow: table.area, title: table.number ? `${table.name} · ${table.number}` : table.name, body });
 }
 
 async function placeWalkIn(tableID) {
+  if (blockOperationalAction()) return;
   const guests = Math.max(1, Number($("walkin-guests")?.value || 1));
   const tables = structuredClone(app.data.tables);
   const table = tables.find((item) => item.id === tableID);
@@ -1908,6 +1906,7 @@ async function placeWalkIn(tableID) {
 }
 
 async function placeReservation(reservationID) {
+  if (blockOperationalAction()) return;
   const reservations = structuredClone(app.data.reservations);
   const reservation = reservations.find((item) => item.id === reservationID);
   if (!reservation?.tableID) return;
@@ -1925,6 +1924,7 @@ async function placeReservation(reservationID) {
 }
 
 async function setTableStatus(tableID, status, guests = 0) {
+  if (blockOperationalAction()) return;
   const tables = structuredClone(app.data.tables);
   const table = tables.find((item) => item.id === tableID);
   if (!table) return;
@@ -1940,6 +1940,7 @@ async function setTableStatus(tableID, status, guests = 0) {
 }
 
 function openOrder(tableID) {
+  if (blockOperationalAction()) return;
   const table = app.data.tables.find((item) => item.id === tableID);
   if (!table) return;
   app.orderTableID = tableID;
@@ -2078,6 +2079,7 @@ function removeCart(productID) {
 }
 
 async function submitOrder() {
+  if (blockOperationalAction()) return;
   const table = app.data.tables.find((item) => item.id === app.orderTableID);
   if (!table || !app.orderCart.length || table.status !== "besetzt") return;
   const cashDay = activeCashDay();
@@ -2139,20 +2141,6 @@ async function submitOrder() {
     closeModal();
     navigate("tables");
   }
-}
-
-async function updateTicket(ticketID, direction, explicitStatus = null) {
-  const order = ["Neu", "In Zubereitung", "Fertig", "Serviert"];
-  const tickets = structuredClone(app.data.tickets);
-  const ticket = tickets.find((item) => item.id === ticketID);
-  if (!ticket) return;
-  const current = order.indexOf(ticket.status);
-  ticket.status = explicitStatus || order[Math.max(0, Math.min(order.length - 1, current + direction))];
-  ticket.updatedAt = swiftDate();
-  if (["Fertig", "Serviert"].includes(ticket.status)) {
-    (ticket.lineItems || []).forEach((item) => { item.status = "Fertig"; });
-  }
-  await savePatch({ tickets }, `Bon ist jetzt „${ticket.status}“.`);
 }
 
 function openReservationEditor(reservationID = null, initialTableID = null) {
@@ -2989,10 +2977,6 @@ function handleViewClick(event) {
   if (cashDayID) return openCashDayReport(cashDayID);
   const shiftReportID = event.target.closest("[data-shift-report-id]")?.dataset.shiftReportId;
   if (shiftReportID) return openShiftReport(shiftReportID);
-  const nextTicket = event.target.closest("[data-ticket-next]");
-  if (nextTicket) return updateTicket(nextTicket.dataset.ticketNext, 1, nextTicket.dataset.nextStatus);
-  const backTicket = event.target.closest("[data-ticket-back]");
-  if (backTicket) return updateTicket(backTicket.dataset.ticketBack, -1);
   const area = event.target.closest("[data-area]")?.dataset.area;
   if (area) {
     app.tableArea = area;

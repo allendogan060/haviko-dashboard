@@ -420,11 +420,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 .split-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.65fr); gap: 16px; }
 .section {
   min-width: 0;
+  margin-bottom: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
   overflow: hidden;
 }
+.section:last-child { margin-bottom: 0; }
 .section-header {
   min-width: 0;
   display: flex;
