@@ -33,7 +33,8 @@ const app = {
   orderCart: [],
   orderTableID: null,
   reviews: [],
-  loading: false
+  loading: false,
+  isLoggingOut: false
 };
 
 const roleTitles = {
@@ -85,6 +86,7 @@ const routes = [
   { id: "shifts", title: "Schicht", symbol: "◷", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
   { id: "analytics", title: "Statistik", symbol: "↗", roles: ["restaurant_manager", "management"] },
   { id: "reviews", title: "Bewertungen", symbol: "★", roles: ["restaurant_manager", "management"] },
+  { id: "reports", title: "Berichte", symbol: "▤", roles: ["restaurant_manager", "management"] },
   { id: "stations", title: "Stationen", symbol: "▣", roles: ["restaurant_manager"] },
   { id: "settings", title: "Einstellungen", symbol: "⚙", roles: ["restaurant_manager"] }
 ];
@@ -100,6 +102,7 @@ const routeSlugs = {
   shifts: "schicht",
   analytics: "statistik",
   reviews: "bewertungen",
+  reports: "berichte",
   stations: "stationen",
   settings: "einstellungen"
 };
@@ -639,10 +642,12 @@ async function initializeRestaurantState(session) {
 }
 
 async function loadWorkspace(restaurantID = null) {
+  if (app.isLoggingOut) return;
   setSyncState("saving", "Wird geladen");
   const result = await rpc("web_get_restaurant_workspace", {
     p_restaurant_id: restaurantID
   });
+  if (app.isLoggingOut) return;
   if (!result?.restaurantId) throw new Error("Kein Restaurantzugang gefunden.");
   app.workspace = result;
   app.data = normalizeState(result.state);
@@ -838,6 +843,7 @@ function render() {
     case "shifts": renderShifts(); break;
     case "analytics": renderAnalytics(); break;
     case "reviews": renderReviews(); break;
+    case "reports": renderReports(); break;
     case "stations": renderStations(); break;
     case "settings": renderSettings(); break;
     default: renderOverview();
@@ -1447,6 +1453,155 @@ async function renderReviews() {
         </article>`).join("")}</div>` : emptyHTML("Noch keine Bewertungen", "Nach abgeschlossenen Besuchen können Gäste eine verifizierte Rückmeldung senden.")}
     </div></section>
   `;
+}
+
+function cashDayReport(session) {
+  const opened = dateFromSwift(session.openedAt);
+  const closed = session.closedAt ? dateFromSwift(session.closedAt) : new Date();
+  const inWindow = (record) => {
+    const at = dateFromSwift(record.createdAt);
+    return at && at >= opened && at <= closed;
+  };
+  const payments = app.data.paymentRecords.filter(inWindow);
+  const methodKind = (id) => app.data.paymentMethods.find((method) => method.id === id)?.kind;
+  const sumBy = (kind) => payments
+    .filter((payment) => methodKind(payment.methodID) === kind)
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const revenue = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const receiptCount = app.data.fiscalReceipts.filter(inWindow).length;
+  const guestCount = app.data.reservations
+    .filter((reservation) =>
+      sameDay(reservation.time, localDateInput(opened)) &&
+      !["Storniert", "Nicht erschienen"].includes(reservation.status))
+    .reduce((sum, reservation) => sum + Number(reservation.guests || 0), 0);
+  const team = app.data.shiftRecords
+    .filter((record) => dateFromSwift(record.start) < closed && dateFromSwift(record.end) > opened)
+    .map((record) => {
+      const name = app.data.team.find((member) => member.id === record.memberID)?.name || "Mitarbeiter";
+      const memberRevenue = payments
+        .filter((payment) => payment.createdBy === name)
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      return { name, revenue: memberRevenue, workedSeconds: workedSeconds(record) };
+    });
+  return {
+    revenue,
+    cashRevenue: sumBy("Bar"),
+    cardRevenue: sumBy("Karte"),
+    voucherRevenue: sumBy("Gutschein"),
+    receiptCount,
+    guestCount,
+    team
+  };
+}
+
+function renderReports() {
+  const sessions = [...app.data.cashDaySessions]
+    .filter((session) => session.status === "closed")
+    .sort((a, b) => dateFromSwift(b.closedAt) - dateFromSwift(a.closedAt));
+  const shiftRecords = [...app.data.shiftRecords].sort(
+    (a, b) => dateFromSwift(b.start) - dateFromSwift(a.start)
+  );
+  $("view").innerHTML = `
+    <div class="page-tools"><div><h2>Berichte</h2><p>Tagesabschlüsse und Schichtauswertungen.</p></div></div>
+    <section class="section table-section">
+      <header class="section-header"><h2>Tagesberichte</h2><span class="badge">${sessions.length}</span></header>
+      ${sessions.length ? `<table class="data-table">
+        <thead><tr><th>Datum</th><th>Geschlossen von</th><th>Umsatz</th><th>Differenz</th><th></th></tr></thead>
+        <tbody>${sessions.slice(0, 60).map((session) => {
+          const report = cashDayReport(session);
+          const difference = Number(session.actualCash || 0) - Number(session.expectedCash || 0);
+          return `
+          <tr>
+            <td>${formatDate(session.businessDate, { dateStyle: "medium" })}</td>
+            <td>${escapeHTML(session.closedBy || "–")}</td>
+            <td>${formatCurrency(report.revenue)}</td>
+            <td>${formatCurrency(difference)}</td>
+            <td><button class="row-button" type="button" data-cash-day-id="${escapeHTML(session.id)}">Bericht</button></td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table>` : emptyHTML("Noch keine Tagesberichte", "Nach dem ersten abgeschlossenen Betriebstag erscheint hier der Bericht.")}
+    </section>
+    <section class="section table-section">
+      <header class="section-header"><h2>Schichtberichte</h2><span class="badge">${shiftRecords.length}</span></header>
+      ${shiftRecords.length ? `<table class="data-table">
+        <thead><tr><th>Mitarbeiter</th><th>Datum</th><th>Arbeitszeit</th><th>Umsatz</th><th></th></tr></thead>
+        <tbody>${shiftRecords.slice(0, 60).map((record) => {
+          const name = app.data.team.find((member) => member.id === record.memberID)?.name || "Mitarbeiter";
+          const revenue = app.data.paymentRecords
+            .filter((payment) => {
+              const at = dateFromSwift(payment.createdAt);
+              return payment.createdBy === name && at >= dateFromSwift(record.start) && at <= dateFromSwift(record.end);
+            })
+            .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+          return `
+          <tr>
+            <td><strong>${escapeHTML(name)}</strong></td>
+            <td>${formatDate(record.start, { dateStyle: "medium" })}</td>
+            <td>${durationText(workedSeconds(record))}</td>
+            <td>${formatCurrency(revenue)}</td>
+            <td><button class="row-button" type="button" data-shift-report-id="${escapeHTML(record.id)}">Bericht</button></td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table>` : emptyHTML("Noch keine Schichtberichte", "Nach dem Ausstempeln erscheint die Auswertung hier.")}
+    </section>
+  `;
+}
+
+function openCashDayReport(sessionID) {
+  const session = app.data.cashDaySessions.find((item) => item.id === sessionID);
+  if (!session) return;
+  const report = cashDayReport(session);
+  const difference = Number(session.actualCash || 0) - Number(session.expectedCash || 0);
+  openModal({
+    eyebrow: "Tagesbericht",
+    title: formatDate(session.businessDate, { dateStyle: "full" }),
+    body: `
+      <div class="detail-list">
+        <div><span>Geöffnet</span><strong>${formatDate(session.openedAt)} · ${escapeHTML(session.openedBy || "–")}</strong></div>
+        <div><span>Geschlossen</span><strong>${session.closedAt ? formatDate(session.closedAt) : "–"} · ${escapeHTML(session.closedBy || "–")}</strong></div>
+        <div><span>Startbestand</span><strong>${formatCurrency(session.openingFloat)}</strong></div>
+        <div><span>Umsatz gesamt</span><strong>${formatCurrency(report.revenue)}</strong></div>
+        <div><span>Bar</span><strong>${formatCurrency(report.cashRevenue)}</strong></div>
+        <div><span>Karte</span><strong>${formatCurrency(report.cardRevenue)}</strong></div>
+        <div><span>Gutschein</span><strong>${formatCurrency(report.voucherRevenue)}</strong></div>
+        <div><span>Sollbestand</span><strong>${formatCurrency(session.expectedCash)}</strong></div>
+        <div><span>Istbestand</span><strong>${formatCurrency(session.actualCash)}</strong></div>
+        <div><span>Differenz</span><strong>${formatCurrency(difference)}</strong></div>
+        <div><span>Belege</span><strong>${report.receiptCount}</strong></div>
+        <div><span>Gäste</span><strong>${report.guestCount}</strong></div>
+      </div>
+      ${report.team.length ? `<div class="activity-list">${report.team.map((member) => `
+        <article class="activity-row"><span class="activity-icon">◷</span><div class="activity-copy"><strong>${escapeHTML(member.name)}</strong><span>${durationText(member.workedSeconds)}</span></div><strong>${formatCurrency(member.revenue)}</strong></article>`).join("")}</div>` : ""}
+      ${session.closingNote ? `<p class="modal-note">${escapeHTML(session.closingNote)}</p>` : ""}
+    `,
+    footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
+  });
+}
+
+function openShiftReport(recordID) {
+  const record = app.data.shiftRecords.find((item) => item.id === recordID);
+  if (!record) return;
+  const name = app.data.team.find((member) => member.id === record.memberID)?.name || "Mitarbeiter";
+  const payments = app.data.paymentRecords.filter((payment) => {
+    const at = dateFromSwift(payment.createdAt);
+    return payment.createdBy === name && at >= dateFromSwift(record.start) && at <= dateFromSwift(record.end);
+  });
+  const revenue = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  openModal({
+    eyebrow: "Schichtbericht",
+    title: name,
+    body: `
+      <div class="detail-list">
+        <div><span>Beginn</span><strong>${formatDate(record.start)}</strong></div>
+        <div><span>Ende</span><strong>${formatDate(record.end)}</strong></div>
+        <div><span>Pause</span><strong>${durationText(record.breakDuration || 0)}</strong></div>
+        <div><span>Arbeitszeit</span><strong>${durationText(workedSeconds(record))}</strong></div>
+        <div><span>Zahlungen</span><strong>${payments.length}</strong></div>
+        <div><span>Umsatz</span><strong>${formatCurrency(revenue)}</strong></div>
+      </div>
+    `,
+    footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
+  });
 }
 
 function renderStations() {
@@ -2598,8 +2753,112 @@ function openAccountMenu() {
       <p class="modal-note">Geräte- und Druckerzugänge werden aus Sicherheitsgründen ausschließlich in der Haviko App verwendet.</p>`,
     footer: `
       <button class="secondary" type="button" data-modal-action="copy-code">Kennung kopieren</button>
+      <button class="secondary" type="button" data-modal-action="edit-name">Namen ändern</button>
+      ${app.workspace.role === "restaurant_manager" ? `<button class="secondary" type="button" data-modal-action="change-password">Passwort ändern</button>` : ""}
       <button class="danger" type="button" data-modal-action="logout">Abmelden</button>`
   });
+}
+
+function openEditProfileName() {
+  openModal({
+    eyebrow: roleTitles[app.workspace.role] || "Haviko",
+    title: "Namen ändern",
+    body: `
+      <form id="edit-name-form">
+        <label class="field">
+          <span>Name</span>
+          <input id="edit-name-value" value="${escapeHTML(app.workspace.displayName || app.workspace.username)}" minlength="2" required>
+        </label>
+        <p class="form-error hidden" id="edit-name-error" role="alert"></p>
+      </form>`,
+    footer: `
+      <button class="quiet" type="button" data-modal-action="close">Abbrechen</button>
+      <button class="primary" type="button" data-modal-action="save-name">Speichern</button>`
+  });
+}
+
+async function saveProfileName() {
+  const input = $("edit-name-value");
+  const error = $("edit-name-error");
+  error.classList.add("hidden");
+  const newName = input.value.trim();
+  if (newName.length < 2) {
+    error.textContent = "Bitte gib einen gültigen Namen ein.";
+    error.classList.remove("hidden");
+    return;
+  }
+  try {
+    await rpc("update_restaurant_credential_identity", {
+      target_restaurant_id: app.workspace.restaurantId,
+      previous_username: app.workspace.username,
+      member_name: newName,
+      member_password: "",
+      member_role: app.workspace.role
+    });
+    app.workspace.displayName = newName;
+    $("sidebar-user-name").textContent = newName;
+    toast("Gespeichert", "Dein Name wurde aktualisiert.", "success");
+    closeModal();
+  } catch (caught) {
+    error.textContent = friendlyError(caught);
+    error.classList.remove("hidden");
+  }
+}
+
+function openChangePassword() {
+  openModal({
+    eyebrow: roleTitles[app.workspace.role] || "Haviko",
+    title: "Passwort ändern",
+    body: `
+      <form id="change-password-form">
+        <label class="field">
+          <span>Aktuelles Passwort</span>
+          <input id="change-password-current" type="password" autocomplete="current-password" required>
+        </label>
+        <label class="field">
+          <span>Neues Passwort</span>
+          <input id="change-password-new" type="password" autocomplete="new-password" minlength="10" required>
+        </label>
+        <label class="field">
+          <span>Neues Passwort bestätigen</span>
+          <input id="change-password-confirm" type="password" autocomplete="new-password" minlength="10" required>
+        </label>
+        <p class="form-error hidden" id="change-password-error" role="alert"></p>
+      </form>`,
+    footer: `
+      <button class="quiet" type="button" data-modal-action="close">Abbrechen</button>
+      <button class="primary" type="button" data-modal-action="save-password">Speichern</button>`
+  });
+}
+
+async function saveProfilePassword() {
+  const error = $("change-password-error");
+  error.classList.add("hidden");
+  const currentPassword = $("change-password-current").value;
+  const newPassword = $("change-password-new").value;
+  const confirmPassword = $("change-password-confirm").value;
+  if (newPassword.length < 10) {
+    error.textContent = "Das neue Passwort muss mindestens 10 Zeichen haben.";
+    error.classList.remove("hidden");
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    error.textContent = "Die Passwörter stimmen nicht überein.";
+    error.classList.remove("hidden");
+    return;
+  }
+  try {
+    await rpc("change_primary_owner_password", {
+      p_restaurant_id: app.workspace.restaurantId,
+      p_current_password: currentPassword,
+      p_new_password: newPassword
+    });
+    toast("Gespeichert", "Dein Passwort wurde geändert.", "success");
+    closeModal();
+  } catch (caught) {
+    error.textContent = friendlyError(caught);
+    error.classList.remove("hidden");
+  }
 }
 
 async function saveStation() {
@@ -2705,6 +2964,10 @@ function handleViewClick(event) {
   if (deviceID) return openDeviceEditor(deviceID);
   const guestID = event.target.closest("[data-guest-id]")?.dataset.guestId;
   if (guestID) return openGuestProfile(guestID);
+  const cashDayID = event.target.closest("[data-cash-day-id]")?.dataset.cashDayId;
+  if (cashDayID) return openCashDayReport(cashDayID);
+  const shiftReportID = event.target.closest("[data-shift-report-id]")?.dataset.shiftReportId;
+  if (shiftReportID) return openShiftReport(shiftReportID);
   const nextTicket = event.target.closest("[data-ticket-next]");
   if (nextTicket) return updateTicket(nextTicket.dataset.ticketNext, 1, nextTicket.dataset.nextStatus);
   const backTicket = event.target.closest("[data-ticket-back]");
@@ -2769,6 +3032,10 @@ function handleModalClick(event) {
   if (action === "save-table") saveTable();
   if (action === "save-station") saveStation();
   if (action === "account") openAccountMenu();
+  if (action === "edit-name") openEditProfileName();
+  if (action === "save-name") saveProfileName();
+  if (action === "change-password") openChangePassword();
+  if (action === "save-password") saveProfilePassword();
   if (action === "copy-code") {
     navigator.clipboard
       .writeText(app.workspace.restaurantCode)
@@ -2853,6 +3120,8 @@ async function register(event) {
 }
 
 async function logout() {
+  if (app.isLoggingOut) return;
+  app.isLoggingOut = true;
   try {
     if (app.session?.access_token) {
       await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
@@ -2862,7 +3131,13 @@ async function logout() {
     }
   } finally {
     clearSession();
-    window.location.replace(LOGIN_URL);
+    if ($("modal")?.open) closeModal();
+    if (IS_LOGIN_HOST) {
+      showAuth();
+      app.isLoggingOut = false;
+    } else {
+      window.location.replace(LOGIN_URL);
+    }
   }
 }
 
@@ -2897,6 +3172,7 @@ function updateOnlineStatus() {
 }
 
 async function start() {
+  if (app.isLoggingOut) return;
   switchAuth(INITIAL_AUTH_MODE);
   try {
     const stored = readStoredSession();
