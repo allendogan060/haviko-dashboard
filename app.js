@@ -3234,15 +3234,38 @@ window.addEventListener("popstate", () => {
   window.scrollTo({ top: 0, behavior: "auto" });
 });
 
-updateOnlineStatus();
-if (
-  !DEVELOPMENT_MODE ||
-  readCookie("haviko_preview_access") === "granted"
-) {
-  $("development-gate").classList.add("hidden");
-  start();
-} else {
-  window.location.replace(
-    `https://autorisieren.haviko.de/?next=${encodeURIComponent(window.location.href)}`
-  );
+async function checkMaintenanceMode() {
+  try {
+    const status = await rpc("get_system_status");
+    const active = Boolean(status?.maintenance_mode);
+    if (status?.maintenance_message) {
+      $("maintenance-message").textContent = status.maintenance_message;
+    }
+    $("maintenance-shell").classList.toggle("hidden", !active);
+    if (active) {
+      $("boot-shell")?.classList.add("hidden");
+      document.body.classList.remove("is-booting");
+    }
+    return active;
+  } catch {
+    return false;
+  }
 }
+
+updateOnlineStatus();
+(async () => {
+  const underMaintenance = await checkMaintenanceMode();
+  setInterval(checkMaintenanceMode, 30000);
+  if (underMaintenance) return;
+  if (
+    !DEVELOPMENT_MODE ||
+    readCookie("haviko_preview_access") === "granted"
+  ) {
+    $("development-gate").classList.add("hidden");
+    start();
+  } else {
+    window.location.replace(
+      `https://autorisieren.haviko.de/?next=${encodeURIComponent(window.location.href)}`
+    );
+  }
+})();
