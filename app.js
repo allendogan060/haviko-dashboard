@@ -731,11 +731,15 @@ function toast(title, message, type = "success") {
 
 function showAuth() {
   document.title = "Anmelden | Haviko";
+  document.body.classList.remove("is-booting");
+  $("boot-shell")?.classList.add("hidden");
   $("auth-shell").classList.remove("hidden");
   $("app-shell").classList.add("hidden");
 }
 
 function showWorkspace() {
+  document.body.classList.remove("is-booting");
+  $("boot-shell")?.classList.add("hidden");
   $("auth-shell").classList.add("hidden");
   $("app-shell").classList.remove("hidden");
   $("restaurant-name").textContent = app.data.restaurantName;
@@ -780,7 +784,7 @@ function navButton(route, mobile = false) {
   return `
     <button class="nav-button ${app.route === route.id ? "selected" : ""}"
       type="button" data-route="${route.id}" aria-current="${app.route === route.id ? "page" : "false"}">
-      <span class="nav-symbol" aria-hidden="true">${route.symbol}</span>
+      ${mobile ? `<span class="nav-symbol" aria-hidden="true">${route.symbol}</span>` : ""}
       <span>${escapeHTML(title)}</span>
       ${count && !mobile ? `<span class="nav-count">${count}</span>` : ""}
     </button>

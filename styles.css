@@ -19,8 +19,8 @@
   --line: #dce4e1;
   --surface: #ffffff;
   --surface-muted: #f3f7f5;
-  --page: #eaf0ed;
-  --sidebar: 246px;
+  --page: #f2f5f4;
+  --sidebar: 264px;
   --radius: 8px;
   --shadow: 0 16px 48px rgba(8, 55, 45, 0.10);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
@@ -42,6 +42,38 @@ body {
   color: var(--ink);
   letter-spacing: 0;
 }
+
+.boot-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  background: var(--forest-deep);
+  color: white;
+}
+
+.boot-mark {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+}
+
+.boot-shell strong { font-size: 24px; }
+.boot-shell span { color: rgba(255,255,255,0.62); font-size: 13px; }
+.boot-shell i {
+  width: 24px;
+  height: 24px;
+  margin-top: 14px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: boot-spin 750ms linear infinite;
+}
+@keyframes boot-spin { to { transform: rotate(360deg); } }
 
 button, input, select, textarea { min-width: 0; font: inherit; letter-spacing: 0; }
 button {
@@ -258,32 +290,44 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
   width: var(--sidebar);
   display: flex;
   flex-direction: column;
-  padding: 18px 14px;
+  padding: 22px 16px 18px;
   background: var(--forest-deep);
   color: white;
 }
 
-.sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 4px 7px 20px; }
+.sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 30px; }
 .sidebar-brand div { display: grid; }
 .sidebar-brand strong { font-size: 18px; }
 .sidebar-brand small { color: rgba(255,255,255,0.55); font-size: 11px; }
 
-.sidebar nav { display: grid; gap: 3px; overflow-y: auto; }
+.sidebar-label {
+  margin: 0 10px 9px;
+  color: rgba(255,255,255,0.38);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sidebar nav { display: grid; gap: 2px; overflow-y: auto; }
 .nav-button {
   display: grid;
-  grid-template-columns: 25px 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   min-height: 44px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  color: rgba(255,255,255,0.68);
-  padding: 8px 10px;
+  color: rgba(255,255,255,0.66);
+  padding: 9px 11px;
   text-align: left;
   font-weight: 700;
 }
 .nav-button:hover { background: rgba(255,255,255,0.07); color: white; }
-.nav-button.selected { background: var(--action); color: white; }
+.nav-button.selected {
+  background: rgba(255,255,255,0.11);
+  color: white;
+  box-shadow: inset 3px 0 0 #73d2b6;
+}
 .nav-symbol { width: 22px; text-align: center; font-size: 17px; }
 .nav-count { min-width: 22px; padding: 2px 6px; border-radius: 10px; background: rgba(255,255,255,0.14); text-align: center; font-size: 11px; }
 
@@ -296,7 +340,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
   position: sticky;
   inset: 0 0 auto;
   z-index: 10;
-  height: 82px;
+  height: 76px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -336,7 +380,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 .restaurant-switch span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
 .restaurant-switch small { color: var(--muted); }
 
-.view { width: min(100%, 1500px); min-width: 0; margin: 0 auto; padding: clamp(18px, 3vw, 36px); }
+.view { width: min(100%, 1580px); min-width: 0; margin: 0 auto; padding: clamp(20px, 2.5vw, 34px); }
 .page-tools {
   display: flex;
   align-items: flex-start;
