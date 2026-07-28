@@ -573,6 +573,23 @@ function defaultOnlineBookingConfiguration(session = {}) {
   };
 }
 
+function pairsToObject(value) {
+  if (Array.isArray(value)) {
+    const result = {};
+    for (let i = 0; i < value.length - 1; i += 2) {
+      result[value[i]] = value[i + 1];
+    }
+    return result;
+  }
+  if (value && typeof value === "object") return value;
+  return {};
+}
+
+function objectToPairs(value) {
+  if (Array.isArray(value)) return value;
+  return Object.entries(value || {}).flatMap(([key, val]) => [key, val]);
+}
+
 function normalizeState(state = {}) {
   return {
     restaurantName: state.restaurantName || app.workspace?.restaurantName || "Restaurant",
@@ -594,9 +611,9 @@ function normalizeState(state = {}) {
     tickets: state.tickets || [],
     reservations: state.reservations || [],
     guestReviews: state.guestReviews || [],
-    tableOrders: state.tableOrders || {},
-    tableSaleItems: state.tableSaleItems || {},
-    tableRevenue: state.tableRevenue || {},
+    tableOrders: pairsToObject(state.tableOrders),
+    tableSaleItems: pairsToObject(state.tableSaleItems),
+    tableRevenue: pairsToObject(state.tableRevenue),
     activeShiftStart: state.activeShiftStart ?? null,
     activeBreakStart: state.activeBreakStart ?? null,
     accumulatedBreak: state.accumulatedBreak || 0,
@@ -668,9 +685,13 @@ async function savePatch(patch, message = "Gespeichert") {
   }
   setSyncState("saving", "Synchronisiert");
   try {
+    const outgoingPatch = { ...patch };
+    for (const key of ["tableOrders", "tableSaleItems", "tableRevenue"]) {
+      if (key in outgoingPatch) outgoingPatch[key] = objectToPairs(outgoingPatch[key]);
+    }
     const result = await rpc("web_patch_restaurant_state", {
       p_restaurant_id: app.workspace.restaurantId,
-      p_patch: patch,
+      p_patch: outgoingPatch,
       p_expected_updated_at: app.updatedAt
     });
     app.data = normalizeState(result.state);
