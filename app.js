@@ -1025,7 +1025,7 @@ function renderTables() {
         const total = tableRunningTotal(table.id);
         return `
           <button class="table-tile" type="button" data-table-id="${table.id}"
-            style="--table-color:${itemColor(table.colorName)};--status-color:${tableStatusColor(table.status)}">
+            style="--table-color:${tableStatusColor(table.status)};--status-color:${tableStatusColor(table.status)}">
             <span class="status-dot"></span>
             <div>
               <h3>${escapeHTML(table.number ? `${table.name} · ${table.number}` : table.name)}</h3>
