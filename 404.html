@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0a5a49">
+  <title>Haviko</title>
+</head>
+<body>
+  <script>
+    (() => {
+      const route = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.location.replace(`/?__route=${encodeURIComponent(route)}`);
+    })();
+  </script>
+</body>
+</html>

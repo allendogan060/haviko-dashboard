@@ -12,6 +12,10 @@ const DASHBOARD_URL = "https://dashboard.haviko.de/";
 const IS_LOGIN_HOST = window.location.hostname === "login.haviko.de";
 const IS_DASHBOARD_HOST = window.location.hostname === "dashboard.haviko.de";
 const SWIFT_REFERENCE_SECONDS = 978307200;
+const FALLBACK_ROUTE = new URLSearchParams(window.location.search).get("__route");
+if (FALLBACK_ROUTE?.startsWith("/") && !FALLBACK_ROUTE.startsWith("//")) {
+  window.history.replaceState(null, "", FALLBACK_ROUTE);
+}
 const INITIAL_AUTH_MODE =
   new URLSearchParams(window.location.search).get("mode") === "register"
     ? "register"
@@ -84,6 +88,50 @@ const routes = [
   { id: "stations", title: "Stationen", symbol: "▣", roles: ["restaurant_manager"] },
   { id: "settings", title: "Einstellungen", symbol: "⚙", roles: ["restaurant_manager"] }
 ];
+
+const routeSlugs = {
+  overview: "start",
+  tables: "tische",
+  orders: "bestellungen",
+  reservations: "reservierungen",
+  guests: "gaesteregister",
+  products: "produkte",
+  team: "team",
+  shifts: "schicht",
+  analytics: "statistik",
+  reviews: "bewertungen",
+  stations: "stationen",
+  settings: "einstellungen"
+};
+
+const slugRoutes = Object.fromEntries(
+  Object.entries(routeSlugs).map(([routeID, slug]) => [slug, routeID])
+);
+
+function routeFromLocation() {
+  const segments = window.location.pathname
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => decodeURIComponent(segment));
+  const slug = segments[0] === "r" ? segments[2] : segments[0];
+  return slugRoutes[slug] || null;
+}
+
+function routePath(routeID) {
+  const code = String(app.workspace?.restaurantCode || app.data?.restaurantCode || "")
+    .trim()
+    .toUpperCase();
+  const slug = routeSlugs[routeID] || routeSlugs.overview;
+  return `/r/${encodeURIComponent(code)}/${slug}`;
+}
+
+function syncRouteURL(mode = "push") {
+  if (!IS_DASHBOARD_HOST || !app.workspace) return;
+  const path = routePath(app.route);
+  if (window.location.pathname === path) return;
+  const method = mode === "replace" ? "replaceState" : "pushState";
+  window.history[method]({ route: app.route }, "", path);
+}
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -688,7 +736,6 @@ function showAuth() {
 }
 
 function showWorkspace() {
-  document.title = "Dashboard | Haviko";
   $("auth-shell").classList.add("hidden");
   $("app-shell").classList.remove("hidden");
   $("restaurant-name").textContent = app.data.restaurantName;
@@ -696,9 +743,12 @@ function showWorkspace() {
   $("restaurant-role").textContent = roleTitles[app.workspace.role] || app.workspace.role;
   $("sidebar-user-name").textContent = app.workspace.displayName;
   $("sidebar-user-role").textContent = roleTitles[app.workspace.role] || app.workspace.role;
+  const requestedRoute = routeFromLocation();
+  if (requestedRoute && routeAllowed(requestedRoute)) app.route = requestedRoute;
   if (!routeAllowed(app.route)) app.route = roleRouteList()[0]?.id || "overview";
   buildNavigation();
   render();
+  syncRouteURL("replace");
 }
 
 function routeCount(route) {
@@ -754,20 +804,25 @@ function buildNavigation() {
   $("mobile-navigation").innerHTML = mobileRoutes.map((route) => navButton(route, true)).join("");
 }
 
-function navigate(routeID) {
+function navigate(routeID, options = {}) {
   if (routeID === "more") {
     showMoreNavigation();
     return;
   }
   if (!routeAllowed(routeID)) return;
   app.route = routeID;
+  syncRouteURL(options.historyMode || "push");
   buildNavigation();
   render();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({
+    top: 0,
+    behavior: options.smooth === false ? "auto" : "smooth"
+  });
 }
 
 function render() {
   const route = routes.find((item) => item.id === app.route);
+  document.title = `${route?.title || "Dashboard"} | Haviko`;
   $("page-title").textContent = route?.title || "Haviko";
   switch (app.route) {
     case "tables": renderTables(); break;
@@ -2886,6 +2941,18 @@ $("view").addEventListener("submit", (event) => {
 });
 window.addEventListener("online", updateOnlineStatus);
 window.addEventListener("offline", updateOnlineStatus);
+window.addEventListener("popstate", () => {
+  if (!app.workspace) return;
+  const routeID = routeFromLocation() || "overview";
+  if (!routeAllowed(routeID)) {
+    syncRouteURL("replace");
+    return;
+  }
+  app.route = routeID;
+  buildNavigation();
+  render();
+  window.scrollTo({ top: 0, behavior: "auto" });
+});
 
 updateOnlineStatus();
 if (
