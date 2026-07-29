@@ -1173,7 +1173,7 @@ function renderReservations() {
             ${reservations.map((reservation) => `
               <tr>
                 <td>${formatDate(reservation.time, { hour: "2-digit", minute: "2-digit" })}</td>
-                <td><strong>${escapeHTML(reservation.name)}</strong><br><small>${escapeHTML(reservation.phone || reservation.email || "")}</small></td>
+                <td><button class="row-button" type="button" data-guest-id="${escapeHTML(guestKeyFor(reservation))}"><strong>${escapeHTML(reservation.name)}</strong></button><br><small>${escapeHTML(reservation.phone || reservation.email || "")}</small></td>
                 <td>${Number(reservation.guests || 0)}</td>
                 <td>${escapeHTML(reservation.table || "Nicht zugewiesen")}</td>
                 <td>${statusBadge(reservation.status)}</td>
@@ -1379,6 +1379,11 @@ function renderShifts() {
       </table>` : emptyHTML("Noch keine Schichten", "Nach dem Ausstempeln erscheint deine Arbeitszeit hier.")}
     </section>
   `;
+}
+
+function guestKeyFor(reservation) {
+  const contactKey = String(reservation.email || reservation.phone || "").trim().toLowerCase();
+  return contactKey || `name:${String(reservation.name || "").trim().toLowerCase()}`;
 }
 
 function guestProfiles() {
