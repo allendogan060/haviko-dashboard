@@ -35,7 +35,8 @@ const app = {
   orderTableID: null,
   reviews: [],
   loading: false,
-  isLoggingOut: false
+  isLoggingOut: false,
+  fiscalStatus: null
 };
 
 const roleTitles = {
@@ -77,19 +78,19 @@ function defaultPermissions(role) {
 }
 
 const routes = [
-  { id: "overview", title: "Start", symbol: "⌂", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
-  { id: "tables", title: "Tische", symbol: "▦", roles: ["restaurant_manager", "management", "service"] },
-  { id: "orders", title: "Bestellungen", symbol: "☷", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
-  { id: "reservations", title: "Reservierungen", symbol: "□", roles: ["restaurant_manager", "management", "service"] },
-  { id: "guests", title: "Gästeregister", symbol: "◎", roles: ["restaurant_manager", "management", "service"] },
-  { id: "products", title: "Produkte", symbol: "+", roles: ["restaurant_manager"] },
-  { id: "team", title: "Team", symbol: "◎", roles: ["restaurant_manager"] },
-  { id: "shifts", title: "Schicht", symbol: "◷", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
-  { id: "analytics", title: "Statistik", symbol: "↗", roles: ["restaurant_manager", "management"] },
-  { id: "reviews", title: "Bewertungen", symbol: "★", roles: ["restaurant_manager", "management"] },
-  { id: "reports", title: "Berichte", symbol: "▤", roles: ["restaurant_manager", "management"] },
-  { id: "stations", title: "Stationen", symbol: "▣", roles: ["restaurant_manager"] },
-  { id: "settings", title: "Einstellungen", symbol: "⚙", roles: ["restaurant_manager"] }
+  { id: "overview", title: "Start", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
+  { id: "tables", title: "Tische", roles: ["restaurant_manager", "management", "service"] },
+  { id: "orders", title: "Bestellungen", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
+  { id: "reservations", title: "Reservierungen", roles: ["restaurant_manager", "management", "service"] },
+  { id: "guests", title: "Gästeregister", roles: ["restaurant_manager", "management", "service"] },
+  { id: "products", title: "Produkte", roles: ["restaurant_manager"] },
+  { id: "team", title: "Team", roles: ["restaurant_manager"] },
+  { id: "shifts", title: "Schicht", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
+  { id: "analytics", title: "Statistik", roles: ["restaurant_manager", "management"] },
+  { id: "reviews", title: "Bewertungen", roles: ["restaurant_manager", "management"] },
+  { id: "reports", title: "Berichte", roles: ["restaurant_manager", "management"] },
+  { id: "stations", title: "Stationen", roles: ["restaurant_manager"] },
+  { id: "settings", title: "Einstellungen", roles: ["restaurant_manager"] }
 ];
 
 const routeSlugs = {
@@ -646,7 +647,19 @@ function normalizeState(state = {}) {
     },
     fiscalReceipts: state.fiscalReceipts || [],
     cashDaySessions: state.cashDaySessions || [],
-    fiscalAuditEvents: state.fiscalAuditEvents || []
+    fiscalAuditEvents: state.fiscalAuditEvents || [],
+    loyaltyConfiguration: state.loyaltyConfiguration || {
+      enabled: false,
+      visitsRequired: 5,
+      rewardKind: "freeProduct",
+      voucherValue: 10,
+      discountPercentage: 10,
+      freeProductName: "Gratis Dessert"
+    },
+    digitalReceiptConfiguration: state.digitalReceiptConfiguration || {
+      enabled: false,
+      tipLinkURL: ""
+    }
   };
 }
 
@@ -778,9 +791,7 @@ function blockOperationalAction() {
 function toast(title, message, type = "success") {
   const item = document.createElement("div");
   item.className = "toast";
-  const symbol = type === "error" ? "!" : "✓";
   item.innerHTML = `
-    <div class="activity-icon">${symbol}</div>
     <div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(message)}</span></div>
     <button type="button" aria-label="Hinweis schließen">×</button>
   `;
@@ -844,7 +855,6 @@ function navButton(route, mobile = false) {
   return `
     <button class="nav-button ${app.route === route.id ? "selected" : ""}"
       type="button" data-route="${route.id}" aria-current="${app.route === route.id ? "page" : "false"}">
-      ${mobile ? `<span class="nav-symbol" aria-hidden="true">${route.symbol}</span>` : ""}
       <span>${escapeHTML(title)}</span>
       ${count && !mobile ? `<span class="nav-count">${count}</span>` : ""}
     </button>
@@ -861,7 +871,7 @@ function buildNavigation() {
     .slice(0, 4);
   const remaining = allowed.filter((route) => !mobileRoutes.some((item) => item.id === route.id));
   if (remaining.length) {
-    mobileRoutes.push({ id: "more", title: "Mehr", symbol: "•••", roles: [] });
+    mobileRoutes.push({ id: "more", title: "Mehr", roles: [] });
   } else {
     mobileRoutes.push(...allowed.filter((route) => !mobileRoutes.includes(route)).slice(0, 5 - mobileRoutes.length));
   }
@@ -905,10 +915,10 @@ function render() {
   }
 }
 
-function metric(title, value, note, symbol) {
+function metric(title, value, note) {
   return `
     <article class="metric">
-      <div class="metric-head"><span>${escapeHTML(title)}</span><b class="metric-symbol">${symbol}</b></div>
+      <div class="metric-head"><span>${escapeHTML(title)}</span></div>
       <strong>${escapeHTML(value)}</strong>
       <small>${escapeHTML(note)}</small>
     </article>
@@ -941,10 +951,10 @@ function renderOverview() {
 
   $("view").innerHTML = `
     <div class="metric-grid">
-      ${metric("Umsatz heute", formatCurrency(revenue), canManage() ? "Erfasste Zahlungen" : "Für deine Rolle", "€")}
-      ${metric("Reservierungen", String(todayReservations.length), `${todayReservations.reduce((sum, item) => sum + Number(item.guests || 0), 0)} Personen`, "□")}
-      ${metric("Aktive Tische", String(activeTables.length), `${app.data.tables.length} Tische insgesamt`, "▦")}
-      ${metric("Offene Bons", String(openTickets.length), `${openTickets.filter((ticket) => ticket.status === "Fertig").length} abholbereit`, "☷")}
+      ${metric("Umsatz heute", formatCurrency(revenue), canManage() ? "Erfasste Zahlungen" : "Für deine Rolle")}
+      ${metric("Reservierungen", String(todayReservations.length), `${todayReservations.reduce((sum, item) => sum + Number(item.guests || 0), 0)} Personen`)}
+      ${metric("Aktive Tische", String(activeTables.length), `${app.data.tables.length} Tische insgesamt`)}
+      ${metric("Offene Bons", String(openTickets.length), `${openTickets.filter((ticket) => ticket.status === "Fertig").length} abholbereit`)}
     </div>
     <div class="split-layout">
       <section class="section">
@@ -953,7 +963,6 @@ function renderOverview() {
           ${activities.length ? `
             <div class="activity-list">${activities.map((item) => `
               <div class="activity-row">
-                <span class="activity-icon">${item.symbol}</span>
                 <div class="activity-copy"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.subtitle)}</span></div>
                 <time>${formatDate(item.date, { hour: "2-digit", minute: "2-digit" })}</time>
               </div>`).join("")}
@@ -963,21 +972,20 @@ function renderOverview() {
       <section class="section">
         <header class="section-header"><div><h2>Schnellzugriff</h2><span>Häufige Aktionen</span></div></header>
         <div class="section-body compact-list">
-          ${quickAction("reservations", "Reservierung anlegen", "Gast und Tisch eintragen", "R")}
-          ${routeAllowed("tables") ? quickAction("tables", "Tisch öffnen", "Walk-in platzieren oder bestellen", "T") : ""}
-          ${routeAllowed("orders") ? quickAction("orders", "Bons prüfen", "Küche und Abholung", "B") : ""}
-          ${routeAllowed("shifts") ? quickAction("shifts", "Schicht verwalten", "Ein- und ausstempeln", "S") : ""}
+          ${quickAction("reservations", "Reservierung anlegen", "Gast und Tisch eintragen")}
+          ${routeAllowed("tables") ? quickAction("tables", "Tisch öffnen", "Walk-in platzieren oder bestellen") : ""}
+          ${routeAllowed("orders") ? quickAction("orders", "Bons prüfen", "Küche und Abholung") : ""}
+          ${routeAllowed("shifts") ? quickAction("shifts", "Schicht verwalten", "Ein- und ausstempeln") : ""}
         </div>
       </section>
     </div>
   `;
 }
 
-function quickAction(route, title, subtitle, symbol) {
+function quickAction(route, title, subtitle) {
   if (!routeAllowed(route)) return "";
   return `
     <button class="compact-row quiet full" type="button" data-route="${route}">
-      <span class="activity-icon">${symbol}</span>
       <span class="activity-copy"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(subtitle)}</span></span>
       <span>›</span>
     </button>
@@ -1160,10 +1168,10 @@ function renderReservations() {
       </div>
     </div>
     <div class="metric-grid">
-      ${metric("Buchungen", String(active.length), "am ausgewählten Tag", "□")}
-      ${metric("Tische", String(tableCount), `${active.filter((item) => !item.tableID).length} ohne Tisch`, "▦")}
-      ${metric("Personen", String(guests), "erwartete Gäste", "◎")}
-      ${metric("Platziert", String(active.filter((item) => item.status === "Platziert").length), "aktuell im Restaurant", "✓")}
+      ${metric("Buchungen", String(active.length), "am ausgewählten Tag")}
+      ${metric("Tische", String(tableCount), `${active.filter((item) => !item.tableID).length} ohne Tisch`)}
+      ${metric("Personen", String(guests), "erwartete Gäste")}
+      ${metric("Platziert", String(active.filter((item) => item.status === "Platziert").length), "aktuell im Restaurant")}
     </div>
     <section class="section table-section">
       ${reservations.length ? `
@@ -1205,7 +1213,7 @@ function renderProducts() {
     ${app.data.products.length ? `<div class="product-grid">
       ${app.data.products.map((product) => `
         <article class="product-card" style="--product-color:${itemColor(product.colorName)}">
-          <header><div><h3>${escapeHTML(product.name)}</h3><p>${escapeHTML(product.category)} · ${escapeHTML(product.station)}</p>${productRoutingIssue(product) ? `<span class="routing-warning">⚠ ${escapeHTML(productRoutingIssue(product))}</span>` : ""}</div>${product.isAvailable ? `<span class="badge green">Aktiv</span>` : `<span class="badge red">Pausiert</span>`}</header>
+          <header><div><h3>${escapeHTML(product.name)}</h3><p>${escapeHTML(product.category)} · ${escapeHTML(product.station)}</p>${productRoutingIssue(product) ? `<span class="routing-warning">Hinweis: ${escapeHTML(productRoutingIssue(product))}</span>` : ""}</div>${product.isAvailable ? `<span class="badge green">Aktiv</span>` : `<span class="badge red">Pausiert</span>`}</header>
           <strong>${formatCurrency(product.price)}</strong>
           <footer><span class="badge">${Number(product.taxRate || 0)} % MwSt.</span><button class="row-button" type="button" data-product-id="${product.id}">Bearbeiten</button></footer>
         </article>`).join("")}
@@ -1357,10 +1365,10 @@ function renderShifts() {
       </div>
     </div>
     <div class="metric-grid">
-      ${metric("Status", activeStart ? (app.data.activeBreakStart ? "Pause" : "Im Dienst") : "Nicht im Dienst", current?.name || app.workspace.displayName, "◷")}
-      ${metric("Schichten", String(records.length), "gespeicherte Einsätze", "□")}
-      ${metric("Arbeitszeit", durationText(records.reduce((sum, record) => sum + workedSeconds(record), 0)), "gesamte Aufzeichnung", "⌁")}
-      ${metric("Offene Anfragen", String(app.data.shiftRequests.filter((request) => request.status === "Offen").length), "Schichtübernahmen", "↔")}
+      ${metric("Status", activeStart ? (app.data.activeBreakStart ? "Pause" : "Im Dienst") : "Nicht im Dienst", current?.name || app.workspace.displayName)}
+      ${metric("Schichten", String(records.length), "gespeicherte Einsätze")}
+      ${metric("Arbeitszeit", durationText(records.reduce((sum, record) => sum + workedSeconds(record), 0)), "gesamte Aufzeichnung")}
+      ${metric("Offene Anfragen", String(app.data.shiftRequests.filter((request) => request.status === "Offen").length), "Schichtübernahmen")}
     </div>
     <section class="section table-section">
       <header class="section-header"><h2>${canManage() ? "Dienstplan" : "Meine geplanten Schichten"}</h2><span class="badge">${planned.length}</span></header>
@@ -1418,21 +1426,50 @@ function guestProfiles() {
     }
     profiles.set(key, existing);
   }
-  return [...profiles.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  const loyalty = app.data.loyaltyConfiguration;
+  const visitsRequired = Math.max(1, Number(loyalty?.visitsRequired || 5));
+  return [...profiles.values()].map((profile) => {
+    const stampCount = profile.reservations.filter(
+      (reservation) => !["Storniert", "Nicht erschienen"].includes(reservation.status)
+    ).length;
+    const rewardsEarned = Math.floor(stampCount / visitsRequired);
+    const stampsIntoCurrentCard = stampCount % visitsRequired;
+    return {
+      ...profile,
+      stampCount,
+      rewardsEarned,
+      stampsIntoCurrentCard,
+      rewardReady: loyalty?.enabled && stampCount > 0 && stampsIntoCurrentCard === 0
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name, "de"));
+}
+
+function loyaltyRewardDescription(loyalty) {
+  if (!loyalty) return "";
+  if (loyalty.rewardKind === "voucher") {
+    return `Gutschein im Wert von ${formatCurrency(Number(loyalty.voucherValue || 0))}`;
+  }
+  if (loyalty.rewardKind === "discount") {
+    return `${Number(loyalty.discountPercentage || 10)}% Rabatt`;
+  }
+  return loyalty.freeProductName || loyalty.rewardDescription || "Gratis Produkt";
 }
 
 function renderGuests() {
   const guests = guestProfiles();
+  const loyalty = app.data.loyaltyConfiguration;
+  const visitsRequired = Math.max(1, Number(loyalty?.visitsRequired || 5));
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Gästeregister</h2><p>Kontaktdaten und Besuchshistorie aus Reservierungen und Walk-ins.</p></div><span class="badge">${guests.length}</span></div>
     <section class="section table-section">
       ${guests.length ? `<table class="data-table">
-        <thead><tr><th>Gast</th><th>Kontakt</th><th>Besuche</th><th>Letzter Besuch</th><th></th></tr></thead>
+        <thead><tr><th>Gast</th><th>Kontakt</th><th>Besuche</th>${loyalty?.enabled ? `<th>Stempelkarte</th>` : ""}<th>Letzter Besuch</th><th></th></tr></thead>
         <tbody>${guests.map((guest) => `
           <tr>
             <td><strong>${escapeHTML(guest.name)}</strong></td>
             <td>${escapeHTML(guest.email || guest.phone || "–")}</td>
             <td>${guest.reservations.length}</td>
+            ${loyalty?.enabled ? `<td>${guest.stampsIntoCurrentCard}/${visitsRequired}${guest.rewardReady ? ` <span class="badge green">Belohnung fällig</span>` : ""}</td>` : ""}
             <td>${formatDate(guest.latest?.time, { dateStyle: "medium" })}</td>
             <td><button class="row-button" type="button" data-guest-id="${escapeHTML(guest.id)}">Profil</button></td>
           </tr>`).join("")}</tbody>
@@ -1443,6 +1480,8 @@ function renderGuests() {
 function openGuestProfile(guestID) {
   const guest = guestProfiles().find((item) => item.id === guestID);
   if (!guest) return;
+  const loyalty = app.data.loyaltyConfiguration;
+  const visitsRequired = Math.max(1, Number(loyalty?.visitsRequired || 5));
   const visits = [...guest.reservations].sort((a, b) => dateFromSwift(b.time) - dateFromSwift(a.time));
   openModal({
     eyebrow: "Gästeregister",
@@ -1453,9 +1492,13 @@ function openGuestProfile(guestID) {
         <div><span>Telefon</span><strong>${escapeHTML(guest.phone || "–")}</strong></div>
         <div><span>Adresse</span><strong>${escapeHTML([guest.street, guest.houseNumber, guest.postalCode, guest.city].filter(Boolean).join(" ") || "–")}</strong></div>
         <div><span>Besuche</span><strong>${visits.length}</strong></div>
+        ${loyalty?.enabled ? `
+        <div><span>Stempelkarte</span><strong>${guest.stampsIntoCurrentCard}/${visitsRequired}${guest.rewardReady ? " · Belohnung fällig" : ""}</strong></div>
+        <div><span>Eingelöste Belohnungen</span><strong>${guest.rewardsEarned}</strong></div>
+        <div><span>Prämie</span><strong>${escapeHTML(loyaltyRewardDescription(loyalty) || "–")}</strong></div>` : ""}
       </div>
       <div class="activity-list">${visits.map((visit) => `
-        <article class="activity-row"><span class="activity-icon">□</span><div class="activity-copy"><strong>${formatDate(visit.time)}</strong><span>${Number(visit.guests)} Personen · ${escapeHTML(visit.status)}</span></div></article>`).join("")}</div>`,
+        <article class="activity-row"><div class="activity-copy"><strong>${formatDate(visit.time)}</strong><span>${Number(visit.guests)} Personen · ${escapeHTML(visit.status)}</span></div></article>`).join("")}</div>`,
     footer: `
       <button class="secondary" type="button" data-modal-action="edit-guest" data-id="${escapeHTML(guest.latest?.id || "")}">Bearbeiten</button>
       <button class="primary" type="button" data-modal-action="close">Fertig</button>`
@@ -1488,10 +1531,10 @@ function renderAnalytics() {
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Betriebsstatistik</h2><p>Aus den synchronisierten Haviko-Vorgängen.</p></div></div>
     <div class="metric-grid">
-      ${metric("Erfasster Umsatz", formatCurrency(revenue || tableRevenue), `${payments.length} Zahlungen`, "€")}
-      ${metric("Reservierungsgäste", String(reservationGuests), `${app.data.reservations.length} Buchungen`, "◎")}
-      ${metric("Bons", String(app.data.tickets.length), `${app.data.tickets.filter((item) => item.status === "Serviert").length} serviert`, "☷")}
-      ${metric("Bewertung", reviewAverage(), `${app.reviews.length || app.data.guestReviews.length} Rückmeldungen`, "★")}
+      ${metric("Erfasster Umsatz", formatCurrency(revenue || tableRevenue), `${payments.length} Zahlungen`)}
+      ${metric("Reservierungsgäste", String(reservationGuests), `${app.data.reservations.length} Buchungen`)}
+      ${metric("Bons", String(app.data.tickets.length), `${app.data.tickets.filter((item) => item.status === "Serviert").length} serviert`)}
+      ${metric("Bewertung", reviewAverage(), `${app.reviews.length || app.data.guestReviews.length} Rückmeldungen`)}
     </div>
     <div class="split-layout">
       <section class="section"><header class="section-header"><h2>Meistbestellte Produkte</h2></header><div class="section-body compact-list">
@@ -1535,7 +1578,6 @@ async function renderReviews() {
     <section class="section"><div class="section-body">
       ${app.reviews.length ? `<div class="activity-list">${app.reviews.map((review) => `
         <article class="activity-row">
-          <span class="activity-icon">★</span>
           <div class="activity-copy"><strong>${escapeHTML(review.guest_name || review.guestName)} · ${Math.max(1, Math.min(5, Number(review.rating)))} von 5</strong><span>${escapeHTML(review.comment || "Keine schriftliche Rückmeldung")}${review.contact_requested || review.contactRequested ? " · Kontakt gewünscht" : ""}</span></div>
           <time>${formatDate(review.created_at || review.createdAt, { dateStyle: "medium" })}</time>
         </article>`).join("")}</div>` : emptyHTML("Noch keine Bewertungen", "Nach abgeschlossenen Besuchen können Gäste eine verifizierte Rückmeldung senden.")}
@@ -1659,7 +1701,7 @@ function openCashDayReport(sessionID) {
         <div><span>Gäste</span><strong>${report.guestCount}</strong></div>
       </div>
       ${report.team.length ? `<div class="activity-list">${report.team.map((member) => `
-        <article class="activity-row"><span class="activity-icon">◷</span><div class="activity-copy"><strong>${escapeHTML(member.name)}</strong><span>${durationText(member.workedSeconds)}</span></div><strong>${formatCurrency(member.revenue)}</strong></article>`).join("")}</div>` : ""}
+        <article class="activity-row"><div class="activity-copy"><strong>${escapeHTML(member.name)}</strong><span>${durationText(member.workedSeconds)}</span></div><strong>${formatCurrency(member.revenue)}</strong></article>`).join("")}</div>` : ""}
       ${session.closingNote ? `<p class="modal-note">${escapeHTML(session.closingNote)}</p>` : ""}
     `,
     footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
@@ -1735,6 +1777,7 @@ function renderSettings() {
   const fiscal = app.data.fiscalConfiguration;
   const booking = app.data.onlineBookingConfiguration;
   const cashDay = activeCashDay();
+  if (!app.fiscalStatus) loadFiscalStatus();
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Einstellungen</h2><p>Restaurant, Online-Buchung und Kassenvorbereitung.</p></div></div>
     <div class="split-layout">
@@ -1796,6 +1839,50 @@ function renderSettings() {
         </div>
       </section>
       <section class="section">
+        <header class="section-header"><h2>Kundenbindungsprogramm</h2></header>
+        <div class="section-body">
+          <form id="loyalty-settings-form">
+            <label class="check"><input id="loyalty-enabled" type="checkbox" ${app.data.loyaltyConfiguration?.enabled ? "checked" : ""}><span>Stempelkarte aktivieren</span></label>
+            <label class="field"><span>Besuche bis zur Belohnung</span><input id="loyalty-visits-required" type="number" min="1" max="100" step="1" value="${Number(app.data.loyaltyConfiguration?.visitsRequired || 5)}" required></label>
+            <label class="field"><span>Art der Belohnung</span>
+              <select id="loyalty-reward-kind">
+                <option value="freeProduct" ${(app.data.loyaltyConfiguration?.rewardKind || "freeProduct") === "freeProduct" ? "selected" : ""}>Gratis Produkt</option>
+                <option value="discount" ${app.data.loyaltyConfiguration?.rewardKind === "discount" ? "selected" : ""}>Rabatt</option>
+                <option value="voucher" ${app.data.loyaltyConfiguration?.rewardKind === "voucher" ? "selected" : ""}>Gutschein</option>
+              </select>
+            </label>
+            <label class="field" id="loyalty-freeproduct-field"><span>Produkt</span><input id="loyalty-free-product-name" value="${escapeHTML(app.data.loyaltyConfiguration?.freeProductName || "Gratis Dessert")}" placeholder="z. B. Gratis Dessert"></label>
+            <label class="field" id="loyalty-discount-field"><span>Rabatt in %</span><input id="loyalty-discount-percentage" type="number" min="1" max="100" step="1" value="${Number(app.data.loyaltyConfiguration?.discountPercentage || 10)}"></label>
+            <label class="field" id="loyalty-voucher-field"><span>Gutscheinwert</span><input id="loyalty-voucher-value" type="number" min="0" step="0.5" value="${Number(app.data.loyaltyConfiguration?.voucherValue || 10)}"></label>
+            <p class="field-hint">Zählt jede Reservierung, die nicht storniert wurde oder als „Nicht erschienen" markiert ist. Sichtbar in App, Dashboard und auf der Reservierungsseite.</p>
+            <button class="primary" type="submit">Kundenbindungsprogramm speichern</button>
+          </form>
+          <script>
+            (() => {
+              const kindSelect = document.getElementById("loyalty-reward-kind");
+              const groups = {
+                freeProduct: document.getElementById("loyalty-freeproduct-field"),
+                discount: document.getElementById("loyalty-discount-field"),
+                voucher: document.getElementById("loyalty-voucher-field")
+              };
+              function sync() {
+                Object.entries(groups).forEach(([key, el]) => {
+                  el?.classList.toggle("hidden", kindSelect?.value !== key);
+                });
+              }
+              kindSelect?.addEventListener("change", sync);
+              sync();
+            })();
+          </script>
+        </div>
+      </section>
+      <section class="section">
+        <header class="section-header"><h2>Kassenstatus (Server)</h2></header>
+        <div class="section-body compact-list">
+          ${renderFiscalStatusSection()}
+        </div>
+      </section>
+      <section class="section">
         <header class="section-header"><h2>Geräte, Stationen & Drucker</h2></header>
         <div class="section-body">
           <p>Gerätezugänge werden im Team-Bereich verwaltet und ausschließlich in der Haviko-App angemeldet.</p>
@@ -1807,7 +1894,7 @@ function renderSettings() {
 }
 
 function settingStatus(title, value, positive) {
-  return `<div class="compact-row"><span class="activity-icon">${positive ? "✓" : "!"}</span><div class="activity-copy"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(value)}</span></div><span class="badge ${positive ? "green" : "orange"}">${positive ? "Bereit" : "Offen"}</span></div>`;
+  return `<div class="compact-row"><div class="activity-copy"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(value)}</span></div><span class="badge ${positive ? "green" : "orange"}">${positive ? "Bereit" : "Offen"}</span></div>`;
 }
 
 async function saveBusinessSettings(event) {
@@ -1850,6 +1937,100 @@ async function saveBusinessSettings(event) {
     { onlineBookingConfiguration: configuration },
     "Betriebs- und Reservierungsdaten wurden gespeichert."
   );
+}
+
+async function saveLoyaltySettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+  const visitsRequired = Math.max(1, Math.min(100, Number($("loyalty-visits-required").value || 5)));
+  const rewardKind = $("loyalty-reward-kind").value;
+  const voucherValue = Math.max(0, Number($("loyalty-voucher-value").value || 0));
+  const discountPercentage = Math.max(1, Math.min(100, Number($("loyalty-discount-percentage").value || 10)));
+  const freeProductName = $("loyalty-free-product-name").value.trim() || "Gratis Dessert";
+  await savePatch(
+    {
+      loyaltyConfiguration: {
+        enabled: $("loyalty-enabled").checked,
+        visitsRequired,
+        rewardKind,
+        voucherValue,
+        discountPercentage,
+        freeProductName
+      }
+    },
+    "Kundenbindungsprogramm wurde gespeichert."
+  );
+}
+
+function renderFiscalStatusSection() {
+  const status = app.fiscalStatus;
+  if (!status) {
+    return `<p class="field-hint">Kassenstatus wird geladen…</p>`;
+  }
+  if (status.error) {
+    return `<p class="field-hint">Kassenstatus konnte nicht geladen werden: ${escapeHTML(status.error)}</p>`;
+  }
+  const register = status.register;
+  const stateTitles = {
+    notConfigured: "Nicht eingerichtet",
+    testMode: "Testmodus",
+    ready: "Bereit",
+    error: "Fehler",
+    offline: "Offline"
+  };
+  const stateGood = { testMode: true, ready: true };
+  const rows = register
+    ? [
+        settingStatus("Status", stateTitles[register.fiscalization_state] || register.fiscalization_state, Boolean(stateGood[register.fiscalization_state])),
+        settingStatus("Kasse", register.label, true),
+        settingStatus("TSE-Anbieter", register.tse_provider || "Kein Anbieter hinterlegt", Boolean(register.tse_provider)),
+        settingStatus("Letzte Signierung", register.last_signed_at ? formatDate(register.last_signed_at, { dateStyle: "medium", timeStyle: "short" }) : "–", Boolean(register.last_signed_at))
+      ].join("")
+    : `<p class="field-hint">Noch keine Kasse eingerichtet.</p>`;
+  return `
+    ${rows}
+    ${settingStatus("Belege (Server)", String(status.receiptCount || 0), status.exportReady)}
+    <p class="field-hint">Vorbereitete DSFinV-K-Dateistruktur, noch keine geprüfte oder zertifizierte DSFinV-K-Kasse.</p>
+    <button class="secondary" type="button" data-action="export-dsfinvk" ${status.exportReady ? "" : "disabled"}>DSFinV-K-Export herunterladen</button>
+  `;
+}
+
+async function loadFiscalStatus() {
+  if (!app.workspace?.restaurantId) return;
+  try {
+    const status = await rpc("get_fiscal_status", { p_restaurant_id: app.workspace.restaurantId });
+    app.fiscalStatus = status;
+    if (app.route === "settings") render();
+  } catch (error) {
+    app.fiscalStatus = { error: error.message };
+  }
+}
+
+async function exportDsfinvk(fromDate, toDate) {
+  await ensureSession();
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/dsfinvk-export`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      restaurantID: app.workspace.restaurantId,
+      fromDate,
+      toDate
+    })
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || "Export fehlgeschlagen.");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `dsfinvk-export-${fromDate}-${toDate}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function useCurrentBusinessLocation() {
@@ -1902,7 +2083,7 @@ function showMoreNavigation() {
   openModal({
     title: "Mehr",
     body: `
-      <div class="compact-list">${items.map((route) => quickAction(route.id, route.title, "Öffnen", route.symbol)).join("")}</div>
+      <div class="compact-list">${items.map((route) => quickAction(route.id, route.title, "Öffnen")).join("")}</div>
       <div class="modal-account-actions">
         <button class="secondary full" type="button" data-modal-action="account">Restaurant & Konto</button>
         <button class="quiet full" type="button" data-modal-action="logout">Abmelden</button>
@@ -1917,8 +2098,8 @@ function openTable(tableID) {
   const total = tableRunningTotal(tableID);
   const body = `
     <div class="metric-grid">
-      ${metric("Status", table.status, table.area, "▦")}
-      ${metric("Gäste", `${table.guests || 0}/${table.capacity}`, reservation?.name || "Keine Reservierung", "◎")}
+      ${metric("Status", table.status, table.area)}
+      ${metric("Gäste", `${table.guests || 0}/${table.capacity}`, reservation?.name || "Keine Reservierung")}
     </div>
     ${reservation && ["frei", "reserviert"].includes(table.status) ? `
       <div class="review-block">
@@ -3067,6 +3248,15 @@ function handleViewClick(event) {
   if (action === "toggle-break") shiftAction("break");
   if (action === "end-shift") shiftAction("end");
   if (action === "use-current-location") useCurrentBusinessLocation();
+  if (action === "export-dsfinvk") {
+    const toDate = localDateInput(new Date());
+    const from = new Date();
+    from.setDate(from.getDate() - 30);
+    const fromDate = localDateInput(from);
+    exportDsfinvk(fromDate, toDate).catch((error) => {
+      toast("Export fehlgeschlagen", error.message, "error");
+    });
+  }
 }
 
 function handleModalClick(event) {
@@ -3293,6 +3483,7 @@ $("view").addEventListener("submit", (event) => {
   if (event.target.id === "cash-day-open-form") openCashDay(event);
   if (event.target.id === "cash-day-close-form") closeCashDay(event);
   if (event.target.id === "business-settings-form") saveBusinessSettings(event);
+  if (event.target.id === "loyalty-settings-form") saveLoyaltySettings(event);
 });
 window.addEventListener("online", updateOnlineStatus);
 window.addEventListener("offline", updateOnlineStatus);
