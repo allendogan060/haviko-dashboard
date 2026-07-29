@@ -30,6 +30,7 @@ const app = {
   route: "overview",
   reservationDate: localDateInput(new Date()),
   tableArea: "",
+  tableViewMode: "grid",
   orderCart: [],
   orderTableID: null,
   reviews: [],
@@ -1009,37 +1010,68 @@ function renderTables() {
   const areas = [...new Set(app.data.tables.map((table) => table.area).filter(Boolean))];
   if (!areas.includes(app.tableArea)) app.tableArea = areas[0] || "";
   const tables = app.data.tables.filter((table) => table.area === app.tableArea);
+  const viewMode = app.tableViewMode === "list" ? "list" : "grid";
   $("view").innerHTML = `
     <div class="page-tools">
       <div><h2>Tischübersicht</h2><p>Belegung, Reservierungen und laufende Umsätze.</p></div>
       <div class="tool-actions">
+        <div class="segmented" role="tablist" aria-label="Ansicht" style="min-width:180px;margin-bottom:0;">
+          <button class="${viewMode === "grid" ? "selected" : ""}" type="button" data-view-mode="grid">Plan</button>
+          <button class="${viewMode === "list" ? "selected" : ""}" type="button" data-view-mode="list">Liste</button>
+        </div>
         ${canManage() ? `<button class="secondary" type="button" data-action="add-table">+ Tisch</button>` : ""}
       </div>
     </div>
     <div class="filter-row">
       ${areas.map((area) => `<button class="filter-button ${area === app.tableArea ? "selected" : ""}" type="button" data-area="${escapeHTML(area)}">${escapeHTML(area)}</button>`).join("")}
     </div>
-    ${tables.length ? `<div class="table-grid">
-      ${tables.map((table) => {
-        const reservation = upcomingReservationForTable(table.id);
-        const total = tableRunningTotal(table.id);
-        return `
-          <button class="table-tile" type="button" data-table-id="${table.id}"
-            style="--table-color:${tableStatusColor(table.status)};--status-color:${tableStatusColor(table.status)}">
-            <span class="status-dot"></span>
-            <div>
-              <h3>${escapeHTML(table.number ? `${table.name} · ${table.number}` : table.name)}</h3>
-              <p>${escapeHTML(table.area)} · ${escapeHTML(table.status)}</p>
-              ${reservation ? `<span class="badge orange">${escapeHTML(reservation.name)} · ${formatDate(reservation.time, { hour: "2-digit", minute: "2-digit" })}</span>` : ""}
-            </div>
-            <div class="table-meta">
-              <strong>${table.guests ? `${table.guests}/${table.capacity} Gäste` : `bis ${table.capacity} Gäste`}</strong>
-              ${total ? `<span class="table-total">${formatCurrency(total)}</span>` : ""}
-            </div>
-          </button>`;
-      }).join("")}
-    </div>` : emptyHTML("Noch keine Tische", canManage() ? "Lege deinen ersten Bereich und Tisch an." : "Die Restaurantleitung hat noch keine Tische angelegt.")}
+    ${tables.length ? (viewMode === "list" ? renderTableList(tables) : renderTableGrid(tables)) : emptyHTML("Noch keine Tische", canManage() ? "Lege deinen ersten Bereich und Tisch an." : "Die Restaurantleitung hat noch keine Tische angelegt.")}
   `;
+}
+
+function renderTableGrid(tables) {
+  return `<div class="table-grid">
+    ${tables.map((table) => {
+      const reservation = upcomingReservationForTable(table.id);
+      const total = tableRunningTotal(table.id);
+      return `
+        <button class="table-tile" type="button" data-table-id="${table.id}"
+          style="--table-color:${tableStatusColor(table.status)};--status-color:${tableStatusColor(table.status)}">
+          <span class="status-dot"></span>
+          <div>
+            <h3>${escapeHTML(table.number ? `${table.name} · ${table.number}` : table.name)}</h3>
+            <p>${escapeHTML(table.area)} · ${escapeHTML(table.status)}</p>
+            ${reservation ? `<span class="badge orange">${escapeHTML(reservation.name)} · ${formatDate(reservation.time, { hour: "2-digit", minute: "2-digit" })}</span>` : ""}
+          </div>
+          <div class="table-meta">
+            <strong>${table.guests ? `${table.guests}/${table.capacity} Gäste` : `bis ${table.capacity} Gäste`}</strong>
+            ${total ? `<span class="table-total">${formatCurrency(total)}</span>` : ""}
+          </div>
+        </button>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderTableList(tables) {
+  return `<section class="section table-section">
+    <table class="data-table">
+      <thead><tr><th>Tisch</th><th>Status</th><th>Gäste</th><th>Reservierung</th><th>Umsatz</th></tr></thead>
+      <tbody>
+        ${tables.map((table) => {
+          const reservation = upcomingReservationForTable(table.id);
+          const total = tableRunningTotal(table.id);
+          return `
+            <tr>
+              <td><button class="row-button" type="button" data-table-id="${table.id}">${escapeHTML(table.number ? `${table.name} · ${table.number}` : table.name)}</button></td>
+              <td><span class="badge" style="background:color-mix(in srgb, ${tableStatusColor(table.status)} 16%, white);color:${tableStatusColor(table.status)}">${escapeHTML(table.status)}</span></td>
+              <td>${table.guests ? `${table.guests}/${table.capacity}` : `bis ${table.capacity}`}</td>
+              <td>${reservation ? `${escapeHTML(reservation.name)} · ${formatDate(reservation.time, { hour: "2-digit", minute: "2-digit" })}` : "–"}</td>
+              <td>${total ? formatCurrency(total) : "–"}</td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  </section>`;
 }
 
 function ticketColor(status) {
@@ -1395,7 +1427,9 @@ function openGuestProfile(guestID) {
       </div>
       <div class="activity-list">${visits.map((visit) => `
         <article class="activity-row"><span class="activity-icon">□</span><div class="activity-copy"><strong>${formatDate(visit.time)}</strong><span>${Number(visit.guests)} Personen · ${escapeHTML(visit.status)}</span></div></article>`).join("")}</div>`,
-    footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
+    footer: `
+      <button class="secondary" type="button" data-modal-action="edit-guest" data-id="${escapeHTML(guest.latest?.id || "")}">Bearbeiten</button>
+      <button class="primary" type="button" data-modal-action="close">Fertig</button>`
   });
 }
 
@@ -2983,6 +3017,12 @@ function handleViewClick(event) {
     renderTables();
     return;
   }
+  const viewMode = event.target.closest("[data-view-mode]")?.dataset.viewMode;
+  if (viewMode) {
+    app.tableViewMode = viewMode;
+    renderTables();
+    return;
+  }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
   if (action === "add-table") openTableEditor();
@@ -3006,6 +3046,7 @@ function handleModalClick(event) {
   const action = target.dataset.modalAction;
   const id = target.dataset.id;
   if (action === "close") closeModal();
+  if (action === "edit-guest" && id) openReservationEditor(id);
   if (action === "walkin") placeWalkIn(id);
   if (action === "place-reservation") placeReservation(id);
   if (action === "order") openOrder(id);
