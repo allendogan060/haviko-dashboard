@@ -679,6 +679,30 @@ async function loadWorkspace(restaurantID = null) {
   setSyncState("ready", "Aktuell");
 }
 
+async function checkSessionStillValid() {
+  if (!app.workspace?.restaurantId || app.isLoggingOut) return;
+  try {
+    const result = await rpc("web_get_restaurant_workspace", {
+      p_restaurant_id: app.workspace.restaurantId
+    });
+    if (!result?.restaurantId) {
+      toast(
+        "Abgemeldet",
+        "Du hast dich an einem anderen Gerät angemeldet. Diese Sitzung wurde beendet.",
+        "error"
+      );
+      clearSession();
+      if (IS_DASHBOARD_HOST) {
+        window.location.replace(LOGIN_URL);
+      } else {
+        showAuth();
+      }
+    }
+  } catch {
+    /* transient network errors shouldn't force a logout */
+  }
+}
+
 async function savePatch(patch, message = "Gespeichert") {
   if (!navigator.onLine) {
     toast("Offline", "Änderungen sind erst wieder online möglich.", "error");
@@ -3302,6 +3326,7 @@ updateOnlineStatus();
 (async () => {
   const underMaintenance = await checkMaintenanceMode();
   setInterval(checkMaintenanceMode, 30000);
+  setInterval(checkSessionStillValid, 30000);
   if (underMaintenance) return;
   if (
     !DEVELOPMENT_MODE ||
