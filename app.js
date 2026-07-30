@@ -252,25 +252,7 @@ function roleRouteList() {
   return routes.filter((route) => route.roles.includes(app.workspace?.role));
 }
 
-function navStorageKey() {
-  return `haviko-hidden-nav:${app.workspace?.restaurantId || "default"}`;
-}
-
-function getHiddenNavIds() {
-  try {
-    return JSON.parse(localStorage.getItem(navStorageKey()) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function setHiddenNavIds(ids) {
-  localStorage.setItem(navStorageKey(), JSON.stringify(ids));
-}
-
-function isNavHideable(routeID) {
-  return !["overview", "settings"].includes(routeID);
-}
+const CORE_NAV_ROUTES = ["overview", "tables", "orders", "reservations", "shifts"];
 
 function authHeaders(includeJSON = true) {
   const headers = {
@@ -884,10 +866,9 @@ function navButton(route, mobile = false) {
 
 function buildNavigation() {
   const allowed = roleRouteList();
-  const hidden = getHiddenNavIds();
-  const visible = allowed.filter((route) => !isNavHideable(route.id) || !hidden.includes(route.id));
-  const tucked = allowed.filter((route) => isNavHideable(route.id) && hidden.includes(route.id));
-  const desktopItems = tucked.length ? [...visible, { id: "more-desktop", title: "Mehr", roles: [] }] : visible;
+  const core = CORE_NAV_ROUTES.map((id) => allowed.find((route) => route.id === id)).filter(Boolean);
+  const tucked = allowed.filter((route) => !core.some((item) => item.id === route.id));
+  const desktopItems = tucked.length ? [...core, { id: "more-desktop", title: "Mehr", roles: [] }] : core;
   $("desktop-navigation").innerHTML = desktopItems.map((route) => navButton(route)).join("");
   const preferred = ["overview", "tables", "orders", "reservations", "shifts"];
   const mobileRoutes = preferred
@@ -1818,15 +1799,6 @@ function renderSettings() {
         </div>
       </section>
       <section class="section">
-        <header class="section-header"><h2>Sidebar anpassen</h2></header>
-        <div class="section-body">
-          <p class="field-hint">Wähle, welche Bereiche direkt in der Seitenleiste erscheinen. Ausgeblendete Bereiche findest du weiterhin unter „Mehr".</p>
-          ${roleRouteList().filter((route) => isNavHideable(route.id)).map((route) => `
-            <label class="check"><input type="checkbox" data-nav-toggle="${route.id}" ${getHiddenNavIds().includes(route.id) ? "" : "checked"}><span>${escapeHTML(route.title)}</span></label>
-          `).join("")}
-        </div>
-      </section>
-      <section class="section">
         <header class="section-header"><h2>Technische Kassenbereitschaft</h2></header>
         <div class="section-body compact-list">
           ${settingStatus("Testmodus", fiscal.isTestMode ? "Aktiv" : "Aus", !fiscal.isTestMode)}
@@ -2130,12 +2102,10 @@ function showMoreNavigation() {
 }
 
 function showHiddenDesktopNavigation() {
-  const hidden = getHiddenNavIds();
-  const items = roleRouteList().filter((route) => isNavHideable(route.id) && hidden.includes(route.id));
+  const items = roleRouteList().filter((route) => !CORE_NAV_ROUTES.includes(route.id));
   openModal({
     title: "Mehr",
-    body: `<div class="compact-list">${items.map((route) => quickAction(route.id, route.title, "Öffnen")).join("")}</div>
-      <p class="field-hint">Du kannst in den Einstellungen unter „Sidebar anpassen" festlegen, welche Bereiche direkt sichtbar sind.</p>`
+    body: `<div class="compact-list">${items.map((route) => quickAction(route.id, route.title, "Öffnen")).join("")}</div>`
   });
 }
 
@@ -3530,14 +3500,6 @@ $("view").addEventListener("change", (event) => {
   if (event.target.id === "reservation-date") {
     app.reservationDate = event.target.value;
     renderReservations();
-  }
-  if (event.target.dataset.navToggle) {
-    const routeID = event.target.dataset.navToggle;
-    const hidden = new Set(getHiddenNavIds());
-    if (event.target.checked) hidden.delete(routeID);
-    else hidden.add(routeID);
-    setHiddenNavIds([...hidden]);
-    buildNavigation();
   }
 });
 $("view").addEventListener("submit", (event) => {
