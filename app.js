@@ -935,6 +935,52 @@ function metric(title, value, note) {
   `;
 }
 
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+function germanHolidays(year) {
+  const easter = easterSunday(year);
+  const offset = (days) => { const d = new Date(easter); d.setDate(d.getDate() + days); return d; };
+  return [
+    { name: "Neujahr", date: new Date(year, 0, 1) },
+    { name: "Karfreitag", date: offset(-2) },
+    { name: "Ostersonntag", date: easter },
+    { name: "Ostermontag", date: offset(1) },
+    { name: "Tag der Arbeit", date: new Date(year, 4, 1) },
+    { name: "Christi Himmelfahrt", date: offset(39) },
+    { name: "Pfingstmontag", date: offset(50) },
+    { name: "Tag der Deutschen Einheit", date: new Date(year, 9, 3) },
+    { name: "1. Weihnachtstag", date: new Date(year, 11, 25) },
+    { name: "2. Weihnachtstag", date: new Date(year, 11, 26) }
+  ];
+}
+
+function upcomingHoliday(days = 7) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const horizon = new Date(today.getTime() + days * 86400000);
+  const years = new Set([today.getFullYear(), horizon.getFullYear()]);
+  const candidates = [...years].flatMap((year) => germanHolidays(year));
+  return candidates
+    .filter((holiday) => holiday.date >= today && holiday.date <= horizon)
+    .sort((a, b) => a.date - b.date)[0] || null;
+}
+
 function renderOverview() {
   const todayReservations = app.data.reservations.filter(
     (reservation) => sameDay(reservation.time) && !["Storniert", "Nicht erschienen"].includes(reservation.status)
@@ -959,7 +1005,9 @@ function renderOverview() {
     }))
   ].sort((a, b) => dateFromSwift(a.date) - dateFromSwift(b.date)).slice(0, 8);
 
+  const holiday = upcomingHoliday();
   $("view").innerHTML = `
+    ${holiday ? `<div class="compact-row no-icon" style="background:var(--purple-soft, #f2edfa);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>${escapeHTML(holiday.name)}</strong><span>${holiday.date.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })} · oft mehr Gäste als sonst</span></div></div>` : ""}
     <div class="metric-grid">
       ${metric("Umsatz heute", formatCurrency(revenue), canManage() ? "Erfasste Zahlungen" : "Für deine Rolle")}
       ${metric("Reservierungen", String(todayReservations.length), `${todayReservations.reduce((sum, item) => sum + Number(item.guests || 0), 0)} Personen`)}
@@ -1076,6 +1124,9 @@ function renderTableGrid(tables) {
     ${tables.map((table) => {
       const reservation = upcomingReservationForTable(table.id);
       const total = tableRunningTotal(table.id);
+      const seatedReservation = table.status === "besetzt"
+        ? app.data.reservations.find((item) => item.tableID === table.id && item.status === "Platziert")
+        : null;
       return `
         <button class="table-tile" type="button" data-table-id="${table.id}"
           style="--table-color:${tableStatusColor(table.status)};--status-color:${tableStatusColor(table.status)}">
@@ -1084,6 +1135,7 @@ function renderTableGrid(tables) {
             <h3>${escapeHTML(table.number ? `${table.name} · ${table.number}` : table.name)}</h3>
             <p>${escapeHTML(table.area)} · ${escapeHTML(table.status)}</p>
             ${reservation ? `<span class="badge orange">${escapeHTML(reservation.name)} · ${formatDate(reservation.time, { hour: "2-digit", minute: "2-digit" })}</span>` : ""}
+            ${seatedReservation?.moodFlag ? `<span class="badge">Stimmung: ${MOOD_LABELS[seatedReservation.moodFlag] || ""}</span>` : ""}
           </div>
           <div class="table-meta">
             <strong>${table.guests ? `${table.guests}/${table.capacity} Gäste` : `bis ${table.capacity} Gäste`}</strong>
@@ -1120,17 +1172,36 @@ function ticketColor(status) {
   return status === "Neu" ? "#2878c7" : status === "In Zubereitung" ? "#ef7b45" : "#0a8f70";
 }
 
+function kitchenLoadForecast() {
+  const now = new Date();
+  const horizon = new Date(now.getTime() + 2 * 3600000);
+  const expectedGuests = app.data.reservations
+    .filter((reservation) => {
+      const time = dateFromSwift(reservation.time);
+      return ["Geplant", "Platziert"].includes(reservation.status) && time >= now && time <= horizon;
+    })
+    .reduce((sum, reservation) => sum + Number(reservation.guests || 0), 0);
+  const openTicketCount = app.data.tickets.filter((ticket) => ticket.status !== "Serviert" && ticket.status !== "Storniert").length;
+  if (expectedGuests <= 0 && openTicketCount < 5) return null;
+  const parts = [];
+  if (expectedGuests > 0) parts.push(`in den nächsten 2 Std. ca. ${expectedGuests} Gäste erwartet`);
+  if (openTicketCount >= 5) parts.push(`aktuell ${openTicketCount} offene Bons`);
+  return `Stoßzeit voraus: ${parts.join(", ")}`;
+}
+
 function renderOrders() {
   const lanes = [
     { status: "Neu", title: "Neu" },
     { status: "In Zubereitung", title: "In Vorbereitung" },
     { status: "Fertig", title: "Fertig" }
   ];
+  const forecast = kitchenLoadForecast();
   $("view").innerHTML = `
     <div class="page-tools">
       <div><h2>Küchen- und Servicebons</h2><p>Statusänderungen sind sofort für App und Web sichtbar.</p></div>
       ${routeAllowed("tables") ? `<button class="secondary" type="button" data-route="tables">Tisch auswählen</button>` : ""}
     </div>
+    ${forecast ? `<div class="compact-row no-icon" style="background:var(--orange-soft, #fff0e8);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>${escapeHTML(forecast)}</strong></div></div>` : ""}
     <div class="ticket-board">
       ${lanes.map((lane) => {
         const tickets = app.data.tickets.filter((ticket) => ticket.status === lane.status);
@@ -1354,6 +1425,41 @@ function renderTeam() {
   `;
 }
 
+function staffingSuggestions() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const suggestions = [];
+  for (let offset = 0; offset < 7; offset += 1) {
+    const day = new Date(today);
+    day.setDate(day.getDate() + offset);
+    let totalGuests = 0;
+    let weeksSampled = 0;
+    for (let weeksBack = 1; weeksBack <= 8; weeksBack += 1) {
+      const pastDay = new Date(day);
+      pastDay.setDate(pastDay.getDate() - 7 * weeksBack);
+      const dayGuests = app.data.reservations
+        .filter((reservation) =>
+          sameDay(reservation.time, localDateInput(pastDay)) && !["Storniert", "Nicht erschienen"].includes(reservation.status)
+        )
+        .reduce((sum, reservation) => sum + Number(reservation.guests || 0), 0);
+      if (dayGuests > 0) {
+        totalGuests += dayGuests;
+        weeksSampled += 1;
+      }
+    }
+    if (weeksSampled < 2) continue;
+    const average = totalGuests / weeksSampled;
+    const suggestedStaff = Math.max(1, Math.ceil(average / 15));
+    const plannedStaff = new Set(
+      app.data.scheduledShifts
+        .filter((shift) => sameDay(shift.start, localDateInput(day)))
+        .map((shift) => shift.memberID)
+    ).size;
+    suggestions.push({ date: day, average, weeksSampled, suggestedStaff, plannedStaff });
+  }
+  return suggestions;
+}
+
 function renderShifts() {
   const activeStart = app.data.activeShiftStart;
   const records = [...app.data.shiftRecords].sort(
@@ -1380,6 +1486,17 @@ function renderShifts() {
       ${metric("Arbeitszeit", durationText(records.reduce((sum, record) => sum + workedSeconds(record), 0)), "gesamte Aufzeichnung")}
       ${metric("Offene Anfragen", String(app.data.shiftRequests.filter((request) => request.status === "Offen").length), "Schichtübernahmen")}
     </div>
+    ${canManage() ? (() => {
+      const suggestions = staffingSuggestions();
+      return suggestions.length ? `
+        <section class="section"><header class="section-header"><h2>Dienstplan-Vorschläge</h2></header><div class="section-body compact-list">
+          ${suggestions.map((suggestion) => `
+            <div class="compact-row no-icon"><div class="activity-copy">
+              <strong>${suggestion.date.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "short" })}</strong>
+              <span>Ø ${Math.round(suggestion.average)} Gäste (letzte ${suggestion.weeksSampled} Wochen) · Vorschlag: ${suggestion.suggestedStaff} im Dienst, aktuell ${suggestion.plannedStaff} geplant${suggestion.average < 15 && suggestion.plannedStaff > suggestion.suggestedStaff ? " · Ruhiger Tag – Personal reduzieren oder früher schließen erwägen." : ""}</span>
+            </div></div>`).join("")}
+        </div></section>` : "";
+    })() : ""}
     <section class="section table-section">
       <header class="section-header"><h2>${canManage() ? "Dienstplan" : "Meine geplanten Schichten"}</h2><span class="badge">${planned.length}</span></header>
       ${planned.length ? `<table class="data-table">
@@ -1444,12 +1561,20 @@ function guestProfiles() {
     ).length;
     const rewardsEarned = Math.floor(stampCount / visitsRequired);
     const stampsIntoCurrentCard = stampCount % visitsRequired;
+    const birthdayReservation = [...profile.reservations]
+      .sort((a, b) => dateFromSwift(b.time) - dateFromSwift(a.time))
+      .find((reservation) => reservation.guestBirthday);
+    const birthday = birthdayReservation ? dateFromSwift(birthdayReservation.guestBirthday) : null;
+    const today = new Date();
+    const isBirthdayToday = birthday && birthday.getMonth() === today.getMonth() && birthday.getDate() === today.getDate();
     return {
       ...profile,
       stampCount,
       rewardsEarned,
       stampsIntoCurrentCard,
-      rewardReady: loyalty?.enabled && stampCount > 0 && stampsIntoCurrentCard === 0
+      rewardReady: loyalty?.enabled && stampCount > 0 && stampsIntoCurrentCard === 0,
+      birthday,
+      isBirthdayToday
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "de"));
 }
@@ -1502,6 +1627,7 @@ function openGuestProfile(guestID) {
         <div><span>Telefon</span><strong>${escapeHTML(guest.phone || "–")}</strong></div>
         <div><span>Adresse</span><strong>${escapeHTML([guest.street, guest.houseNumber, guest.postalCode, guest.city].filter(Boolean).join(" ") || "–")}</strong></div>
         <div><span>Besuche</span><strong>${visits.length}</strong></div>
+        ${guest.isBirthdayToday ? `<div><span>Geburtstag</span><strong>Heute</strong></div>` : ""}
         ${loyalty?.enabled ? `
         <div><span>Stempelkarte</span><strong>${guest.stampsIntoCurrentCard}/${visitsRequired}${guest.rewardReady ? " · Belohnung fällig" : ""}</strong></div>
         <div><span>Eingelöste Belohnungen</span><strong>${guest.rewardsEarned}</strong></div>
@@ -1528,6 +1654,68 @@ function durationText(seconds) {
   return `${hours} Std. ${minutes} Min.`;
 }
 
+function weeklyRhythmInsight() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 84);
+  const recent = app.data.paymentRecords.filter((payment) => dateFromSwift(payment.createdAt) >= cutoff);
+  if (recent.length < 14) return null;
+  const byWeekday = {};
+  recent.forEach((payment) => {
+    const date = dateFromSwift(payment.createdAt);
+    const weekday = date.getDay();
+    if (!byWeekday[weekday]) byWeekday[weekday] = { total: 0, weeks: new Set() };
+    byWeekday[weekday].total += Number(payment.amount || 0);
+    const weekKey = `${date.getFullYear()}-${Math.floor(date.getDate() / 7)}-${date.getMonth()}`;
+    byWeekday[weekday].weeks.add(weekKey);
+  });
+  const weekdayNames = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+  let best = null;
+  Object.entries(byWeekday).forEach(([weekday, data]) => {
+    const average = data.total / data.weeks.size;
+    if (!best || average > best.average) best = { weekday: Number(weekday), average };
+  });
+  if (!best) return null;
+  return `${weekdayNames[best.weekday]} ist bei dir normalerweise dein umsatzstärkster Tag (Ø ${formatCurrency(best.average)}, letzte 12 Wochen).`;
+}
+
+function reservationSourceRows() {
+  const groups = {};
+  app.data.reservations.forEach((reservation) => {
+    const source = reservation.source || "Mitarbeiter";
+    groups[source] = (groups[source] || 0) + 1;
+  });
+  const entries = Object.entries(groups).sort((a, b) => b[1] - a[1]);
+  return entries.length ? entries.map(([name, count]) => `
+    <div class="compact-row"><span class="activity-icon">${count}</span><div class="activity-copy"><strong>${escapeHTML(name)}</strong><span>Reservierungen</span></div></div>`).join("") : emptyHTML("Keine Reservierungen", "Herkunft erscheint, sobald Reservierungen vorliegen.");
+}
+
+async function loadIndustryBenchmark() {
+  if (!app.data.onlineBookingConfiguration?.restaurant?.settings?.benchmarkOptIn) return null;
+  try {
+    return await rpc("get_industry_benchmark", { p_restaurant_id: app.workspace.restaurantId });
+  } catch {
+    return null;
+  }
+}
+
+function annualRecap(payments) {
+  const year = new Date().getFullYear();
+  const yearPayments = payments.filter((payment) => dateFromSwift(payment.createdAt).getFullYear() === year);
+  const totalRevenue = yearPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const byDay = {};
+  yearPayments.forEach((payment) => {
+    const key = localDateInput(dateFromSwift(payment.createdAt));
+    byDay[key] = (byDay[key] || 0) + Number(payment.amount || 0);
+  });
+  const bestDayEntry = Object.entries(byDay).sort((a, b) => b[1] - a[1])[0];
+  const productTotals = {};
+  Object.values(app.data.tableSaleItems).flat().forEach((item) => {
+    productTotals[item.name] = (productTotals[item.name] || 0) + Number(item.quantity || 1);
+  });
+  const topProductEntry = Object.entries(productTotals).sort((a, b) => b[1] - a[1])[0];
+  return { year, totalRevenue, bestDayEntry, topProductEntry };
+}
+
 function renderAnalytics() {
   const payments = app.data.paymentRecords;
   const revenue = payments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -1538,6 +1726,8 @@ function renderAnalytics() {
     productSales[item.name] = (productSales[item.name] || 0) + Number(item.quantity || 1);
   });
   const topProducts = Object.entries(productSales).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const rhythmInsight = weeklyRhythmInsight();
+  const recap = annualRecap(payments);
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Betriebsstatistik</h2><p>Aus den synchronisierten Haviko-Vorgängen.</p></div></div>
     <div class="metric-grid">
@@ -1546,6 +1736,7 @@ function renderAnalytics() {
       ${metric("Bons", String(app.data.tickets.length), `${app.data.tickets.filter((item) => item.status === "Serviert").length} serviert`)}
       ${metric("Bewertung", reviewAverage(), `${app.reviews.length || app.data.guestReviews.length} Rückmeldungen`)}
     </div>
+    ${rhythmInsight ? `<div class="compact-row no-icon"><div class="activity-copy"><strong>Wochenrhythmus</strong><span>${escapeHTML(rhythmInsight)}</span></div></div>` : ""}
     <div class="split-layout">
       <section class="section"><header class="section-header"><h2>Meistbestellte Produkte</h2></header><div class="section-body compact-list">
         ${topProducts.length ? topProducts.map(([name, quantity], index) => `
@@ -1555,7 +1746,26 @@ function renderAnalytics() {
         ${paymentMethodRows(payments)}
       </div></section>
     </div>
+    <section class="section"><header class="section-header"><h2>Reservierungsherkunft</h2></header><div class="section-body compact-list">
+      ${reservationSourceRows()}
+    </div></section>
+    <section class="section"><header class="section-header"><h2>Jahresrückblick ${recap.year}</h2></header><div class="section-body compact-list">
+      <div class="compact-row no-icon"><div class="activity-copy"><strong>Umsatz gesamt</strong><span>${formatCurrency(recap.totalRevenue)}</span></div></div>
+      ${recap.bestDayEntry ? `<div class="compact-row no-icon"><div class="activity-copy"><strong>Bester Tag</strong><span>${recap.bestDayEntry[0]} · ${formatCurrency(recap.bestDayEntry[1])}</span></div></div>` : ""}
+      ${recap.topProductEntry ? `<div class="compact-row no-icon"><div class="activity-copy"><strong>Beliebtestes Gericht</strong><span>${escapeHTML(recap.topProductEntry[0])} (${recap.topProductEntry[1]}×)</span></div></div>` : ""}
+    </div></section>
+    <section class="section" id="benchmark-section"></section>
   `;
+  loadIndustryBenchmark().then((benchmark) => {
+    if (!benchmark || !benchmark.participantCount) return;
+    const averageOrderValue = payments.length ? revenue / payments.length : 0;
+    $("benchmark-section").innerHTML = `
+      <header class="section-header"><h2>Branchenvergleich</h2></header>
+      <div class="section-body compact-list">
+        <div class="compact-row no-icon"><div class="activity-copy"><strong>Dein Ø Bon</strong><span>${formatCurrency(averageOrderValue)}</span></div></div>
+        <div class="compact-row no-icon"><div class="activity-copy"><strong>Branchenschnitt (anonym, ${benchmark.participantCount} Restaurants)</strong><span>${formatCurrency(benchmark.averageTicket || 0)}</span></div></div>
+      </div>`;
+  });
 }
 
 function paymentMethodRows(payments) {
@@ -1583,8 +1793,14 @@ async function renderReviews() {
   } catch {
     app.reviews = app.data.guestReviews || [];
   }
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const recentReviews = app.reviews.filter((review) => dateFromSwift(review.created_at || review.createdAt) >= cutoff);
+  const rollingAverage = recentReviews.length
+    ? (recentReviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / recentReviews.length).toFixed(1)
+    : null;
   $("view").innerHTML = `
-    <div class="page-tools"><div><h2>Gästebewertungen</h2><p>${reviewAverage()} aus ${app.reviews.length} Rückmeldungen.</p></div></div>
+    <div class="page-tools"><div><h2>Gästebewertungen</h2><p>${reviewAverage()} aus ${app.reviews.length} Rückmeldungen.${rollingAverage ? ` · Letzte 30 Tage: ${rollingAverage} / 5` : ""}</p></div></div>
     <section class="section"><div class="section-body">
       ${app.reviews.length ? `<div class="activity-list">${app.reviews.map((review) => `
         <article class="activity-row no-icon">
@@ -1634,6 +1850,30 @@ function cashDayReport(session) {
   };
 }
 
+function fiscalReceiptNumberGaps() {
+  const sequences = (app.data.fiscalReceipts || [])
+    .map((receipt) => {
+      const parts = String(receipt.invoiceNumber || "").split("-");
+      if (parts.length !== 3 || Number.isNaN(Number(parts[2]))) return null;
+      return { group: `${parts[0]}-${parts[1]}`, number: Number(parts[2]) };
+    })
+    .filter(Boolean);
+  const groups = {};
+  sequences.forEach(({ group, number }) => {
+    if (!groups[group]) groups[group] = new Set();
+    groups[group].add(number);
+  });
+  const gaps = [];
+  Object.entries(groups).forEach(([group, numbers]) => {
+    const min = Math.min(...numbers);
+    const max = Math.max(...numbers);
+    for (let n = min; n <= max; n += 1) {
+      if (!numbers.has(n)) gaps.push(`${group}-${String(n).padStart(6, "0")}`);
+    }
+  });
+  return gaps;
+}
+
 function renderReports() {
   const sessions = [...app.data.cashDaySessions]
     .filter((session) => session.status === "closed")
@@ -1641,8 +1881,10 @@ function renderReports() {
   const shiftRecords = [...app.data.shiftRecords].sort(
     (a, b) => dateFromSwift(b.start) - dateFromSwift(a.start)
   );
+  const receiptGaps = fiscalReceiptNumberGaps();
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Berichte</h2><p>Tagesabschlüsse und Schichtauswertungen.</p></div></div>
+    ${receiptGaps.length ? `<div class="compact-row no-icon" style="background:var(--orange-soft, #fff0e8);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>Lücke in der Belegnummerierung</strong><span>${escapeHTML(receiptGaps.join(", "))} · kann bedeuten, dass ein Beleg beim Speichern fehlgeschlagen ist.</span></div></div>` : ""}
     <section class="section table-section">
       <header class="section-header"><h2>Tagesberichte</h2><span class="badge">${sessions.length}</span></header>
       ${sessions.length ? `<table class="data-table">
@@ -1840,6 +2082,8 @@ function renderSettings() {
             <label class="check"><input id="business-booking-enabled" type="checkbox" ${booking?.restaurant?.settings?.bookingEnabled ? "checked" : ""}><span>Online-Reservierung veröffentlichen</span></label>
             <label class="check"><input id="business-auto-confirm" type="checkbox" ${booking?.restaurant?.settings?.automaticConfirmation !== false ? "checked" : ""}><span>Reservierungen automatisch bestätigen</span></label>
             <label class="check"><input id="business-location-required" type="checkbox" ${booking?.restaurant?.settings?.clockInRequiresLocation ? "checked" : ""}><span>Einstempeln nur am Restaurant erlauben</span></label>
+            <label class="check"><input id="business-outdoor-seating" type="checkbox" ${booking?.restaurant?.settings?.hasOutdoorSeating ? "checked" : ""}><span>Terrasse / Außenbereich vorhanden</span></label>
+            <label class="check"><input id="business-benchmark-optin" type="checkbox" ${booking?.restaurant?.settings?.benchmarkOptIn ? "checked" : ""}><span>Am anonymen Branchenvergleich teilnehmen</span></label>
             <label class="field"><span>Erlaubter Radius</span><input id="business-location-radius" type="number" min="50" max="1000" step="25" value="${Number(booking?.restaurant?.settings?.clockInRadiusMeters || 150)}"></label>
             <button class="secondary" type="button" data-action="use-current-location">Aktuellen Standort übernehmen</button>
             <p class="field-hint">${booking?.restaurant?.settings?.clockInLatitude != null ? "Standort ist hinterlegt." : "Für die Standortprüfung zuerst den Standort übernehmen oder die Adresse in der App bestätigen."}</p>
@@ -1864,6 +2108,7 @@ function renderSettings() {
             <label class="field" id="loyalty-freeproduct-field"><span>Produkt</span><input id="loyalty-free-product-name" value="${escapeHTML(app.data.loyaltyConfiguration?.freeProductName || "Gratis Dessert")}" placeholder="z. B. Gratis Dessert"></label>
             <label class="field" id="loyalty-discount-field"><span>Rabatt in %</span><input id="loyalty-discount-percentage" type="number" min="1" max="100" step="1" value="${Number(app.data.loyaltyConfiguration?.discountPercentage || 10)}"></label>
             <label class="field" id="loyalty-voucher-field"><span>Gutscheinwert</span><input id="loyalty-voucher-value" type="number" min="0" step="0.5" value="${Number(app.data.loyaltyConfiguration?.voucherValue || 10)}"></label>
+            <label class="check"><input id="loyalty-review-bonus" type="checkbox" ${app.data.loyaltyConfiguration?.awardsStampForReview ? "checked" : ""}><span>Bonus-Stempel für Bewertungen</span></label>
             <p class="field-hint">Zählt jede Reservierung, die nicht storniert wurde oder als „Nicht erschienen" markiert ist. Sichtbar in App, Dashboard und auf der Reservierungsseite.</p>
             <button class="primary" type="submit">Kundenbindungsprogramm speichern</button>
           </form>
@@ -1939,6 +2184,10 @@ async function saveBusinessSettings(event) {
     $("business-auto-confirm").checked;
   configuration.restaurant.settings.clockInRequiresLocation =
     $("business-location-required").checked;
+  configuration.restaurant.settings.hasOutdoorSeating =
+    $("business-outdoor-seating").checked;
+  configuration.restaurant.settings.benchmarkOptIn =
+    $("business-benchmark-optin").checked;
   configuration.restaurant.settings.clockInRadiusMeters = Math.max(
     50,
     Math.min(1000, Number($("business-location-radius").value || 150))
@@ -1966,7 +2215,8 @@ async function saveLoyaltySettings(event) {
         rewardKind,
         voucherValue,
         discountPercentage,
-        freeProductName
+        freeProductName,
+        awardsStampForReview: $("loyalty-review-bonus").checked
       }
     },
     "Kundenbindungsprogramm wurde gespeichert."
@@ -2109,10 +2359,15 @@ function showHiddenDesktopNavigation() {
   });
 }
 
+const MOOD_LABELS = { green: "Grün", yellow: "Gelb", red: "Rot" };
+
 function openTable(tableID) {
   const table = app.data.tables.find((item) => item.id === tableID);
   if (!table) return;
   const reservation = upcomingReservationForTable(tableID);
+  const seatedReservation = table.status === "besetzt"
+    ? app.data.reservations.find((item) => item.tableID === tableID && item.status === "Platziert")
+    : null;
   const total = tableRunningTotal(tableID);
   const body = `
     <div class="metric-grid">
@@ -2127,9 +2382,27 @@ function openTable(tableID) {
     ${table.status === "besetzt" ? `
       <div class="review-block"><strong>Laufender Umsatz: ${formatCurrency(total)}</strong></div>
     ` : ""}
+    ${seatedReservation ? `
+      <label class="field"><span>Stimmung</span>
+        <select onchange="setTableMood('${seatedReservation.id}', this.value)">
+          <option value="" ${!seatedReservation.moodFlag ? "selected" : ""}>Keine Angabe</option>
+          <option value="green" ${seatedReservation.moodFlag === "green" ? "selected" : ""}>Grün</option>
+          <option value="yellow" ${seatedReservation.moodFlag === "yellow" ? "selected" : ""}>Gelb</option>
+          <option value="red" ${seatedReservation.moodFlag === "red" ? "selected" : ""}>Rot</option>
+        </select>
+      </label>
+    ` : ""}
     <p class="modal-note">Platzieren, Bestellen, Bezahlen und Abschließen sind ausschließlich in der Haviko-App möglich. Das Web-Dashboard zeigt den Status nur an.</p>
   `;
   openModal({ eyebrow: table.area, title: table.number ? `${table.name} · ${table.number}` : table.name, body });
+}
+
+async function setTableMood(reservationID, mood) {
+  const reservations = structuredClone(app.data.reservations);
+  const reservation = reservations.find((item) => item.id === reservationID);
+  if (!reservation) return;
+  reservation.moodFlag = mood || null;
+  await savePatch({ reservations }, "Stimmung wurde gespeichert.");
 }
 
 async function placeWalkIn(tableID) {
@@ -2405,6 +2678,27 @@ async function submitOrder() {
   }
 }
 
+function hasReservationConflictWeb(tableID, time, durationMinutes = 105, excludingID = null) {
+  if (!tableID) return false;
+  const start = time.getTime();
+  const end = start + durationMinutes * 60000;
+  return app.data.reservations.some((item) => {
+    if (item.id === excludingID || item.tableID !== tableID) return false;
+    if (!["Geplant", "Zu bestätigen", "Platziert"].includes(item.status)) return false;
+    const otherStart = dateFromSwift(item.time).getTime();
+    const otherEnd = otherStart + 105 * 60000;
+    return start < otherEnd && otherStart < end;
+  });
+}
+
+function suggestTableWeb(guests, time, excludingID = null) {
+  const candidates = app.data.tables.filter((table) =>
+    !table.isPlaceholder && table.capacity >= guests && !hasReservationConflictWeb(table.id, time, 105, excludingID)
+  );
+  candidates.sort((a, b) => a.capacity - b.capacity || a.name.localeCompare(b.name, "de"));
+  return candidates[0] || null;
+}
+
 function openReservationEditor(reservationID = null, initialTableID = null) {
   const reservation = app.data.reservations.find((item) => item.id === reservationID);
   const date = reservation ? dateFromSwift(reservation.time) : new Date(`${app.reservationDate}T18:00:00`);
@@ -2430,13 +2724,51 @@ function openReservationEditor(reservationID = null, initialTableID = null) {
           <label class="field"><span>Personen</span><input id="reservation-guests" type="number" min="1" max="100" value="${Number(reservation?.guests || 2)}" required></label>
           <label class="field"><span>Tisch</span><select id="reservation-table"><option value="">Noch nicht zuweisen</option>${tableOptions}</select></label>
         </div>
+        <p class="field-hint" id="reservation-conflict-hint"></p>
+        <p class="field-hint" id="reservation-suggestion-hint"></p>
+        <label class="field"><span>Geburtstag des Gasts (optional)</span><input id="reservation-birthday" type="date" value="${reservation?.guestBirthday ? localDateInput(dateFromSwift(reservation.guestBirthday)) : ""}"></label>
         <label class="field"><span>Adresse</span><input id="reservation-address" value="${escapeHTML([reservation?.street, reservation?.houseNumber].filter(Boolean).join(" "))}" placeholder="Straße und Hausnummer"></label>
         <div class="field-grid">
           <label class="field"><span>Postleitzahl</span><input id="reservation-postal" value="${escapeHTML(reservation?.postalCode || "")}"></label>
           <label class="field"><span>Ort</span><input id="reservation-city" value="${escapeHTML(reservation?.city || "")}"></label>
         </div>
         <label class="field"><span>Notiz</span><textarea id="reservation-notes" rows="3">${escapeHTML(reservation?.notes || "")}</textarea></label>
-      </form>`,
+        <label class="field" id="reservation-preorder-field" style="display:none;"><span>Vorbestellung</span><textarea id="reservation-preorder" rows="3" placeholder="z. B. 10× Pizza Margherita, 5× Cola">${escapeHTML(reservation?.preOrderNotes || "")}</textarea></label>
+      </form>
+      <script>
+        (() => {
+          const guestsInput = document.getElementById("reservation-guests");
+          const tableSelect = document.getElementById("reservation-table");
+          const dateInput = document.getElementById("reservation-form-date");
+          const timeInput = document.getElementById("reservation-form-time");
+          const preorderField = document.getElementById("reservation-preorder-field");
+          const conflictHint = document.getElementById("reservation-conflict-hint");
+          const suggestionHint = document.getElementById("reservation-suggestion-hint");
+          function sync() {
+            const guests = Number(guestsInput.value || 0);
+            preorderField.style.display = guests >= 8 ? "" : "none";
+            const time = window.dateTimeFromInputs ? window.dateTimeFromInputs(dateInput.value, timeInput.value) : new Date(\`\${dateInput.value}T\${timeInput.value}\`);
+            const excludingID = "${reservation?.id || ""}" || null;
+            if (tableSelect.value && window.hasReservationConflictWeb && window.hasReservationConflictWeb(tableSelect.value, time, 105, excludingID)) {
+              conflictHint.textContent = "Für diesen Tisch überschneidet sich bereits eine Reservierung.";
+              conflictHint.style.color = "var(--red, #c83d4d)";
+            } else {
+              conflictHint.textContent = "";
+            }
+            if (!tableSelect.value && guests > 0 && window.suggestTableWeb) {
+              const suggestion = window.suggestTableWeb(guests, time, excludingID);
+              suggestionHint.textContent = suggestion ? \`Vorschlag: \${suggestion.name}\${suggestion.number ? " · " + suggestion.number : ""} (bis \${suggestion.capacity} Gäste)\` : "";
+            } else {
+              suggestionHint.textContent = "";
+            }
+          }
+          guestsInput?.addEventListener("input", sync);
+          tableSelect?.addEventListener("change", sync);
+          dateInput?.addEventListener("change", sync);
+          timeInput?.addEventListener("change", sync);
+          sync();
+        })();
+      </script>`,
     footer: `
       ${reservation ? `<button class="danger" type="button" data-modal-action="cancel-reservation" data-id="${reservation.id}">Stornieren</button>` : ""}
       <button class="secondary" type="button" data-modal-action="close">Abbrechen</button>
@@ -2464,6 +2796,8 @@ async function saveReservation() {
     postalCode: $("reservation-postal").value.trim(),
     city: $("reservation-city").value.trim(),
     notes: $("reservation-notes").value.trim(),
+    preOrderNotes: $("reservation-preorder")?.value.trim() || null,
+    guestBirthday: $("reservation-birthday").value ? swiftDate(new Date(`${$("reservation-birthday").value}T00:00:00`)) : (existing?.guestBirthday || null),
     tableID,
     table: table ? (table.number ? `${table.name} · ${table.number}` : table.name) : null,
     guests: Number($("reservation-guests").value),
@@ -2669,6 +3003,38 @@ function permissionEditorHTML(member, role) {
     </div>`;
 }
 
+const ONBOARDING_STEPS = [
+  { id: "login", title: "Anmeldung", detail: "Mit eigenem Anmeldenamen und Passwort einloggen." },
+  { id: "tables", title: "Tischplan", detail: "Tische öffnen, Walk-ins platzieren, Reservierungen zuordnen." },
+  { id: "orders", title: "Bestellungen aufnehmen", detail: "Bestellung anlegen und an die Küche senden." },
+  { id: "kitchen", title: "Küchendisplay", detail: "Küchenbons verstehen, Status setzen, Allergien beachten." },
+  { id: "payment", title: "Kasse & Zahlung", detail: "Zahlung erfassen, Trinkgeld, Rechnung abschließen." },
+  { id: "shift", title: "Ein-/Ausstempeln", detail: "Eigene Schicht starten und beenden." },
+  { id: "emergency", title: "Notfallkontakte", detail: "Wo Notfallkontakte und Fluchtwege zu finden sind." }
+];
+
+function onboardingChecklistHTML(memberID) {
+  const completed = new Set(app.data.onboardingChecklistProgress?.[memberID] || []);
+  return `
+    <div class="section-heading"><div><p class="eyebrow">Einarbeitung</p><h3>${completed.size} von ${ONBOARDING_STEPS.length} erledigt</h3></div></div>
+    <div class="compact-list">
+      ${ONBOARDING_STEPS.map((step) => `
+        <label class="check">
+          <input type="checkbox" ${completed.has(step.id) ? "checked" : ""} onchange="toggleOnboardingStep('${memberID}', '${step.id}', this.checked)">
+          <span><strong>${escapeHTML(step.title)}</strong><br><small class="muted">${escapeHTML(step.detail)}</small></span>
+        </label>`).join("")}
+    </div>`;
+}
+
+async function toggleOnboardingStep(memberID, stepID, checked) {
+  const progress = structuredClone(app.data.onboardingChecklistProgress || {});
+  const steps = new Set(progress[memberID] || []);
+  if (checked) steps.add(stepID);
+  else steps.delete(stepID);
+  progress[memberID] = [...steps];
+  await savePatch({ onboardingChecklistProgress: progress }, "Einarbeitung wurde aktualisiert.");
+}
+
 function openMemberEditor(memberID = null) {
   const member = app.data.team.find((item) => item.id === memberID);
   const role = member?.role || "Service";
@@ -2683,7 +3049,8 @@ function openMemberEditor(memberID = null) {
         <label class="field"><span>Telefon</span><input id="member-phone" type="tel" value="${escapeHTML(member?.phone || "")}"></label>
         <p class="field-hint">Der Name ist gleichzeitig der eindeutige Anmeldename. Groß- und Kleinschreibung werden nicht unterschieden. Das Passwort wird ausschließlich als sicherer Hash gespeichert.</p>
         <div id="member-permission-editor">${permissionEditorHTML(member, role)}</div>
-      </form>`,
+      </form>
+      ${member ? onboardingChecklistHTML(member.id) : ""}`,
     footer: `${member ? `<button class="danger" type="button" data-modal-action="delete-member" data-id="${member.id}">Mitarbeiter löschen</button>` : ""}<button class="secondary" type="button" data-modal-action="close">Abbrechen</button><button class="primary" type="button" data-modal-action="save-member">${member ? "Speichern" : "Zugang erstellen"}</button>`
   });
   $("member-role")?.addEventListener("change", () => {
