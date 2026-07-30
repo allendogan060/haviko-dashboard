@@ -996,7 +996,7 @@ function quickAction(route, title, subtitle) {
   if (!routeAllowed(route)) return "";
   return `
     <button class="compact-row quiet full no-icon" type="button" data-route="${route}">
-      <span class="activity-copy"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(subtitle)}</span></span>
+      <span class="activity-copy"><strong>${escapeHTML(title)}</strong>${subtitle ? `<span>${escapeHTML(subtitle)}</span>` : ""}</span>
       <span>›</span>
     </button>
   `;
@@ -2093,7 +2093,7 @@ function showMoreNavigation() {
   openModal({
     title: "Mehr",
     body: `
-      <div class="compact-list">${items.map((route) => quickAction(route.id, route.title, "Öffnen")).join("")}</div>
+      <div class="compact-list">${items.map((route) => quickAction(route.id, route.title)).join("")}</div>
       <div class="modal-account-actions">
         <button class="secondary full" type="button" data-modal-action="account">Restaurant & Konto</button>
         <button class="quiet full" type="button" data-modal-action="logout">Abmelden</button>
@@ -2105,7 +2105,7 @@ function showHiddenDesktopNavigation() {
   const items = roleRouteList().filter((route) => !CORE_NAV_ROUTES.includes(route.id));
   openModal({
     title: "Mehr",
-    body: `<div class="compact-list">${items.map((route) => quickAction(route.id, route.title, "Öffnen")).join("")}</div>`
+    body: `<div class="compact-list">${items.map((route) => quickAction(route.id, route.title)).join("")}</div>`
   });
 }
 
