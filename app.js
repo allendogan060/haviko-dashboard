@@ -791,7 +791,7 @@ function blockOperationalAction() {
 
 function toast(title, message, type = "success") {
   const item = document.createElement("div");
-  item.className = "toast";
+  item.className = "toast no-icon";
   item.innerHTML = `
     <div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(message)}</span></div>
     <button type="button" aria-label="Hinweis schließen">×</button>

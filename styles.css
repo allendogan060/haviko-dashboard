@@ -21,6 +21,8 @@
   --surface-muted: #f3f7f5;
   --page: #f2f5f4;
   --sidebar: 264px;
+  --sidebar-bg: #1a2321;
+  --sidebar-bg-alt: #212b28;
   --radius: 8px;
   --shadow: 0 16px 48px rgba(8, 55, 45, 0.10);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
@@ -290,50 +292,52 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
   width: var(--sidebar);
   display: flex;
   flex-direction: column;
-  padding: 22px 16px 18px;
-  background: var(--forest-deep);
+  padding: 20px 14px 16px;
+  background: var(--sidebar-bg);
   color: white;
 }
 
-.sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 30px; }
+.sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 2px 6px 26px; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 16px; }
 .sidebar-brand div { display: grid; }
-.sidebar-brand strong { font-size: 18px; }
-.sidebar-brand small { color: rgba(255,255,255,0.55); font-size: 11px; }
+.sidebar-brand strong { font-size: 16px; font-weight: 700; letter-spacing: 0.01em; }
+.sidebar-brand small { color: rgba(255,255,255,0.42); font-size: 11px; }
 
 .sidebar-label {
-  margin: 0 10px 9px;
-  color: rgba(255,255,255,0.38);
+  margin: 0 10px 7px;
+  color: rgba(255,255,255,0.32);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.sidebar nav { display: grid; gap: 2px; overflow-y: auto; }
+.sidebar nav { display: grid; gap: 1px; overflow-y: auto; }
 .nav-button {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  min-height: 44px;
+  min-height: 38px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
-  color: rgba(255,255,255,0.66);
-  padding: 9px 11px;
+  color: rgba(255,255,255,0.62);
+  padding: 8px 10px;
   text-align: left;
-  font-weight: 700;
+  font-weight: 600;
+  font-size: 13.5px;
 }
-.nav-button:hover { background: rgba(255,255,255,0.07); color: white; }
+.nav-button:hover { background: rgba(255,255,255,0.05); color: white; }
 .nav-button.selected {
-  background: rgba(255,255,255,0.11);
+  background: var(--sidebar-bg-alt);
   color: white;
-  box-shadow: inset 3px 0 0 #73d2b6;
+  box-shadow: inset 2px 0 0 var(--action);
 }
-.nav-symbol { width: 22px; text-align: center; font-size: 17px; }
-.nav-count { min-width: 22px; padding: 2px 6px; border-radius: 10px; background: rgba(255,255,255,0.14); text-align: center; font-size: 11px; }
+.nav-symbol { width: 20px; text-align: center; font-size: 15px; }
+.nav-count { min-width: 18px; text-align: center; font-size: 11.5px; color: rgba(255,255,255,0.4); font-weight: 600; }
+.nav-button.selected .nav-count { color: rgba(255,255,255,0.65); }
 
-.sidebar-user { margin-top: auto; display: grid; gap: 3px; padding: 14px 9px 2px; border-top: 1px solid rgba(255,255,255,0.12); }
-.sidebar-user span { color: rgba(255,255,255,0.58); font-size: 12px; }
-.sidebar-user .quiet { justify-self: start; min-height: 34px; padding: 6px 0; color: #85d8c1; }
+.sidebar-user { margin-top: auto; display: grid; gap: 3px; padding: 14px 9px 2px; border-top: 1px solid rgba(255,255,255,0.08); }
+.sidebar-user span { color: rgba(255,255,255,0.45); font-size: 12px; }
+.sidebar-user .quiet { justify-self: start; min-height: 34px; padding: 6px 0; color: rgba(255,255,255,0.7); font-weight: 600; }
 
 .workspace { min-width: 0; }
 .workspace-header {
@@ -718,6 +722,11 @@ dialog::backdrop { background: rgba(7,28,23,0.52); backdrop-filter: blur(3px); }
 
 .toast-region { position: fixed; z-index: 120; inset: auto 18px 18px auto; display: grid; gap: 8px; }
 .toast { max-width: min(390px, calc(100vw - 36px)); display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: white; box-shadow: var(--shadow); padding: 12px 14px; }
+.toast.no-icon { grid-template-columns: minmax(0, 1fr) auto; }
+.toast > div { min-width: 0; display: grid; gap: 2px; }
+.toast > div strong { font-size: 13px; }
+.toast > div span { display: block; color: var(--muted); font-size: 12px; overflow-wrap: break-word; }
+.toast > button { flex: 0 0 auto; border: 0; background: transparent; font-size: 18px; color: var(--muted); line-height: 1; }
 .toast strong { display: block; font-size: 13px; }
 .toast span { color: var(--muted); font-size: 12px; }
 .toast button { border: 0; background: transparent; color: var(--muted); }
