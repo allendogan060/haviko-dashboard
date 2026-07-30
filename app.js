@@ -1008,6 +1008,7 @@ function renderOverview() {
   const holiday = upcomingHoliday();
   $("view").innerHTML = `
     ${holiday ? `<div class="compact-row no-icon" style="background:var(--purple-soft, #f2edfa);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>${escapeHTML(holiday.name)}</strong><span>${holiday.date.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })} · oft mehr Gäste als sonst</span></div></div>` : ""}
+    <div id="weather-widget"></div>
     <div class="metric-grid">
       ${metric("Umsatz heute", formatCurrency(revenue), canManage() ? "Erfasste Zahlungen" : "Für deine Rolle")}
       ${metric("Reservierungen", String(todayReservations.length), `${todayReservations.reduce((sum, item) => sum + Number(item.guests || 0), 0)} Personen`)}
@@ -1038,6 +1039,41 @@ function renderOverview() {
       </section>
     </div>
   `;
+  loadWeatherWidget();
+}
+
+const WEATHER_CODE_TEXT = {
+  0: "Klarer Himmel", 1: "Überwiegend klar", 2: "Teilweise bewölkt", 3: "Bedeckt",
+  45: "Nebel", 48: "Reifnebel",
+  51: "Leichter Nieselregen", 53: "Nieselregen", 55: "Starker Nieselregen",
+  61: "Leichter Regen", 63: "Regen", 65: "Starker Regen",
+  71: "Leichter Schneefall", 73: "Schneefall", 75: "Starker Schneefall",
+  80: "Regenschauer", 81: "Regenschauer", 82: "Heftige Regenschauer",
+  95: "Gewitter", 96: "Gewitter mit Hagel", 99: "Gewitter mit Hagel"
+};
+
+async function loadWeatherWidget() {
+  const el = $("weather-widget");
+  if (!el) return;
+  const settings = app.data.onlineBookingConfiguration?.restaurant?.settings;
+  const lat = settings?.clockInLatitude;
+  const lon = settings?.clockInLongitude;
+  if (lat == null || lon == null) {
+    el.innerHTML = `<div class="compact-row no-icon" style="background:var(--surface-soft, #f4f4f6);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>Wetter nicht verfügbar</strong><span>Adresse in den Einstellungen vervollständigen und Standort übernehmen.</span></div></div>`;
+    return;
+  }
+  try {
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+    if (!response.ok) throw new Error("weather request failed");
+    const data = await response.json();
+    const current = data?.current_weather;
+    if (!current) throw new Error("no current weather");
+    const description = WEATHER_CODE_TEXT[current.weathercode] || "Aktuelles Wetter";
+    const temp = Math.round(current.temperature);
+    el.innerHTML = `<div class="compact-row no-icon" style="background:var(--blue-soft, #eaf2fb);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>${temp}°C · ${escapeHTML(description)}</strong><span>Am Restaurantstandort</span></div></div>`;
+  } catch (error) {
+    el.innerHTML = `<div class="compact-row no-icon" style="background:var(--surface-soft, #f4f4f6);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>Wetter nicht verfügbar</strong><span>Bitte später erneut versuchen.</span></div></div>`;
+  }
 }
 
 function quickAction(route, title, subtitle) {
@@ -2073,7 +2109,21 @@ function renderSettings() {
         <header class="section-header"><h2>Online-Reservierung</h2></header>
         <div class="section-body">
           <form id="business-settings-form">
-            <label class="field"><span>Restaurantadresse</span><input id="business-address" value="${escapeHTML(booking?.restaurant?.address || "")}" autocomplete="street-address" required></label>
+            <label class="field"><span>Straße</span><input id="business-street" value="${escapeHTML(booking?.restaurant?.street || "")}" autocomplete="address-line1" required></label>
+            <div class="field-grid">
+              <label class="field"><span>Hausnummer</span><input id="business-house-number" value="${escapeHTML(booking?.restaurant?.houseNumber || "")}"></label>
+              <label class="field"><span>Postleitzahl</span><input id="business-postal-code" value="${escapeHTML(booking?.restaurant?.postalCode || "")}" autocomplete="postal-code" required></label>
+            </div>
+            <div class="field-grid">
+              <label class="field"><span>Ort</span><input id="business-city" value="${escapeHTML(booking?.restaurant?.city || "")}" autocomplete="address-level2" required></label>
+              <label class="field"><span>Bundesland (optional)</span><input id="business-state" value="${escapeHTML(booking?.restaurant?.state || "")}"></label>
+            </div>
+            <label class="field"><span>Land</span>
+              <select id="business-country">
+                <option value="Deutschland" selected>Deutschland</option>
+              </select>
+            </label>
+            <p class="field-hint">Eine vollständige, sauber getrennte Adresse lässt sich zuverlässiger einem Standort zuordnen (u. a. fürs Wetter im Start-Tab).</p>
             <div class="field-grid">
               <label class="field"><span>Telefon</span><input id="business-phone" value="${escapeHTML(booking?.restaurant?.phone || "")}" autocomplete="tel"></label>
               <label class="field"><span>E-Mail</span><input id="business-email" type="email" value="${escapeHTML(booking?.restaurant?.email || "")}" autocomplete="email"></label>
@@ -2173,7 +2223,24 @@ async function saveBusinessSettings(event) {
     app.data.onlineBookingConfiguration ||
       defaultOnlineBookingConfiguration(app.workspace)
   );
-  configuration.restaurant.address = $("business-address").value.trim();
+  const street = $("business-street").value.trim();
+  const houseNumber = $("business-house-number").value.trim();
+  const postalCode = $("business-postal-code").value.trim();
+  const city = $("business-city").value.trim();
+  const state = $("business-state").value.trim();
+  const country = $("business-country").value;
+  configuration.restaurant.street = street;
+  configuration.restaurant.houseNumber = houseNumber;
+  configuration.restaurant.postalCode = postalCode;
+  configuration.restaurant.city = city;
+  configuration.restaurant.state = state;
+  configuration.restaurant.country = country;
+  configuration.restaurant.address = [
+    [street, houseNumber].filter(Boolean).join(" "),
+    [postalCode, city].filter(Boolean).join(" "),
+    state,
+    country
+  ].filter(Boolean).join(", ");
   configuration.restaurant.phone = phone;
   configuration.restaurant.email = email;
   configuration.restaurant.openingHoursText =
