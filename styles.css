@@ -378,6 +378,21 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
   color: var(--ink);
   font-size: 22px;
 }
+.text-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  height: 40px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: white;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+.text-button:hover { background: var(--surface-muted); }
 .restaurant-switch { display: grid; min-width: 160px; border: 0; border-left: 1px solid var(--line); background: transparent; padding: 3px 0 3px 13px; text-align: left; }
 .restaurant-switch span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
 .restaurant-switch small { color: var(--muted); }
@@ -464,6 +479,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
   border-bottom: 1px solid var(--line);
 }
 .activity-row:last-child, .compact-row:last-child { border-bottom: 0; }
+.compact-row.no-icon, .activity-row.no-icon { grid-template-columns: minmax(0, 1fr) auto; }
 .activity-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 7px; background: var(--action-soft); color: var(--action); font-weight: 850; }
 .activity-copy { min-width: 0; display: grid; gap: 2px; }
 .activity-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

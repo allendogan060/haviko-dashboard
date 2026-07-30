@@ -57,6 +57,7 @@ const stateRoleToDatabaseRole = {
 
 const teamPermissions = [
   ["closeOwnShift", "Eigene Schicht schließen", "Die eigene laufende Schicht beenden."],
+  ["editOwnProfile", "Eigenes Profil bearbeiten", "Name und Telefonnummer des eigenen Profils ändern."],
   ["manageCashDay", "Tagesbetrieb verwalten", "Tage öffnen und Tagesabschlüsse durchführen."],
   ["viewStatistics", "Statistiken ansehen", "Umsatz- und Betriebsstatistiken öffnen."],
   ["manageProducts", "Produkte verwalten", "Produkte, Kategorien und Preise bearbeiten."],
@@ -962,7 +963,7 @@ function renderOverview() {
         <div class="section-body">
           ${activities.length ? `
             <div class="activity-list">${activities.map((item) => `
-              <div class="activity-row">
+              <div class="activity-row no-icon">
                 <div class="activity-copy"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.subtitle)}</span></div>
                 <time>${formatDate(item.date, { hour: "2-digit", minute: "2-digit" })}</time>
               </div>`).join("")}
@@ -985,7 +986,7 @@ function renderOverview() {
 function quickAction(route, title, subtitle) {
   if (!routeAllowed(route)) return "";
   return `
-    <button class="compact-row quiet full" type="button" data-route="${route}">
+    <button class="compact-row quiet full no-icon" type="button" data-route="${route}">
       <span class="activity-copy"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(subtitle)}</span></span>
       <span>›</span>
     </button>
@@ -1498,7 +1499,7 @@ function openGuestProfile(guestID) {
         <div><span>Prämie</span><strong>${escapeHTML(loyaltyRewardDescription(loyalty) || "–")}</strong></div>` : ""}
       </div>
       <div class="activity-list">${visits.map((visit) => `
-        <article class="activity-row"><div class="activity-copy"><strong>${formatDate(visit.time)}</strong><span>${Number(visit.guests)} Personen · ${escapeHTML(visit.status)}</span></div></article>`).join("")}</div>`,
+        <article class="activity-row no-icon"><div class="activity-copy"><strong>${formatDate(visit.time)}</strong><span>${Number(visit.guests)} Personen · ${escapeHTML(visit.status)}</span></div></article>`).join("")}</div>`,
     footer: `
       <button class="secondary" type="button" data-modal-action="edit-guest" data-id="${escapeHTML(guest.latest?.id || "")}">Bearbeiten</button>
       <button class="primary" type="button" data-modal-action="close">Fertig</button>`
@@ -1577,7 +1578,7 @@ async function renderReviews() {
     <div class="page-tools"><div><h2>Gästebewertungen</h2><p>${reviewAverage()} aus ${app.reviews.length} Rückmeldungen.</p></div></div>
     <section class="section"><div class="section-body">
       ${app.reviews.length ? `<div class="activity-list">${app.reviews.map((review) => `
-        <article class="activity-row">
+        <article class="activity-row no-icon">
           <div class="activity-copy"><strong>${escapeHTML(review.guest_name || review.guestName)} · ${Math.max(1, Math.min(5, Number(review.rating)))} von 5</strong><span>${escapeHTML(review.comment || "Keine schriftliche Rückmeldung")}${review.contact_requested || review.contactRequested ? " · Kontakt gewünscht" : ""}</span></div>
           <time>${formatDate(review.created_at || review.createdAt, { dateStyle: "medium" })}</time>
         </article>`).join("")}</div>` : emptyHTML("Noch keine Bewertungen", "Nach abgeschlossenen Besuchen können Gäste eine verifizierte Rückmeldung senden.")}
@@ -1701,7 +1702,7 @@ function openCashDayReport(sessionID) {
         <div><span>Gäste</span><strong>${report.guestCount}</strong></div>
       </div>
       ${report.team.length ? `<div class="activity-list">${report.team.map((member) => `
-        <article class="activity-row"><div class="activity-copy"><strong>${escapeHTML(member.name)}</strong><span>${durationText(member.workedSeconds)}</span></div><strong>${formatCurrency(member.revenue)}</strong></article>`).join("")}</div>` : ""}
+        <article class="activity-row no-icon"><div class="activity-copy"><strong>${escapeHTML(member.name)}</strong><span>${durationText(member.workedSeconds)}</span></div><strong>${formatCurrency(member.revenue)}</strong></article>`).join("")}</div>` : ""}
       ${session.closingNote ? `<p class="modal-note">${escapeHTML(session.closingNote)}</p>` : ""}
     `,
     footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
@@ -1894,7 +1895,7 @@ function renderSettings() {
 }
 
 function settingStatus(title, value, positive) {
-  return `<div class="compact-row"><div class="activity-copy"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(value)}</span></div><span class="badge ${positive ? "green" : "orange"}">${positive ? "Bereit" : "Offen"}</span></div>`;
+  return `<div class="compact-row no-icon"><div class="activity-copy"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(value)}</span></div><span class="badge ${positive ? "green" : "orange"}">${positive ? "Bereit" : "Offen"}</span></div>`;
 }
 
 async function saveBusinessSettings(event) {
@@ -2771,6 +2772,11 @@ async function saveMember() {
         member_role: stateRoleToDatabaseRole[roleTitle]
       });
     }
+    await rpc("set_restaurant_member_profile_edit_permission", {
+      target_restaurant_id: app.workspace.restaurantId,
+      member_username: member.username,
+      is_enabled: member.permissions.includes("editOwnProfile")
+    });
     const team = memberID
       ? app.data.team.map((item) => item.id === memberID ? member : item)
       : [...app.data.team, member];
