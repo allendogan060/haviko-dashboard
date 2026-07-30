@@ -1,3 +1,8 @@
+const GERMAN_FEDERAL_STATES = [
+  "Baden-Württemberg", "Bayern", "Berlin", "Brandenburg", "Bremen", "Hamburg",
+  "Hessen", "Mecklenburg-Vorpommern", "Niedersachsen", "Nordrhein-Westfalen",
+  "Rheinland-Pfalz", "Saarland", "Sachsen", "Sachsen-Anhalt", "Schleswig-Holstein", "Thüringen"
+];
 const SUPABASE_URL = "https://dlapwemckfhxklytbqkk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_VeeQLARNn-sULZ4snvp3HA_Hd78H5RN";
 const DEVELOPMENT_MODE = true;
@@ -2116,7 +2121,12 @@ function renderSettings() {
             </div>
             <div class="field-grid">
               <label class="field"><span>Ort</span><input id="business-city" value="${escapeHTML(booking?.restaurant?.city || "")}" autocomplete="address-level2" required></label>
-              <label class="field"><span>Bundesland (optional)</span><input id="business-state" value="${escapeHTML(booking?.restaurant?.state || "")}"></label>
+              <label class="field"><span>Bundesland</span>
+                <select id="business-state">
+                  <option value="" ${!booking?.restaurant?.state ? "selected" : ""}>Keine Angabe</option>
+                  ${GERMAN_FEDERAL_STATES.map(state => `<option value="${state}" ${booking?.restaurant?.state === state ? "selected" : ""}>${state}</option>`).join("")}
+                </select>
+              </label>
             </div>
             <label class="field"><span>Land</span>
               <select id="business-country">
@@ -2259,10 +2269,33 @@ async function saveBusinessSettings(event) {
     50,
     Math.min(1000, Number($("business-location-radius").value || 150))
   );
+  if (street && postalCode && city && configuration.restaurant.settings.clockInLatitude == null) {
+    const coords = await geocodeAddress(configuration.restaurant.address);
+    if (coords) {
+      configuration.restaurant.settings.clockInLatitude = coords.latitude;
+      configuration.restaurant.settings.clockInLongitude = coords.longitude;
+    }
+  }
   await savePatch(
     { onlineBookingConfiguration: configuration },
     "Betriebs- und Reservierungsdaten wurden gespeichert."
   );
+}
+
+async function geocodeAddress(address) {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`,
+      { headers: { Accept: "application/json" } }
+    );
+    if (!response.ok) return null;
+    const results = await response.json();
+    const first = results[0];
+    if (!first) return null;
+    return { latitude: Number(first.lat), longitude: Number(first.lon) };
+  } catch (error) {
+    return null;
+  }
 }
 
 async function saveLoyaltySettings(event) {
