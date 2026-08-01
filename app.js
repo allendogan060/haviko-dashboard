@@ -1013,6 +1013,7 @@ function renderOverview() {
   const holiday = upcomingHoliday();
   $("view").innerHTML = `
     ${holiday ? `<div class="compact-row no-icon" style="background:var(--purple-soft, #f2edfa);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>${escapeHTML(holiday.name)}</strong><span>${holiday.date.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })} · oft mehr Gäste als sonst</span></div></div>` : ""}
+    <div id="dashboard-incident-banner"></div>
     <div id="weather-widget"></div>
     <div class="metric-grid">
       ${metric("Umsatz heute", formatCurrency(revenue), canManage() ? "Erfasste Zahlungen" : "Für deine Rolle")}
@@ -1044,6 +1045,7 @@ function renderOverview() {
       </section>
     </div>
   `;
+  renderDashboardIncidentBanner();
   loadWeatherWidget();
 }
 
@@ -3991,35 +3993,52 @@ window.addEventListener("popstate", () => {
 });
 
 let incidentBannerDismissed = false;
+let lastSystemStatus = null;
 
-function showIncidentBanner(status) {
-  const banner = $("incident-banner");
-  const text = $("incident-banner-text");
-  if (!banner || !text) return;
+function incidentMessageFor(status) {
+  if (!status || status.maintenance_mode) return null;
 
-  if (status?.maintenance_mode || incidentBannerDismissed) {
-    banner.classList.add("hidden");
-    return;
-  }
+  const globalMessage = status.globalIncidentMessage?.trim();
+  if (globalMessage) return globalMessage;
 
-  const globalMessage = status?.globalIncidentMessage?.trim();
-  if (globalMessage) {
-    text.textContent = globalMessage;
-    banner.classList.remove("hidden");
-    return;
-  }
-
-  const components = Array.isArray(status?.components) ? status.components : [];
+  const components = Array.isArray(status.components) ? status.components : [];
   const degraded = components.filter((c) => !c.isOperational);
-  if (degraded.length === 0) {
-    banner.classList.add("hidden");
-    return;
-  }
+  if (degraded.length === 0) return null;
 
-  text.textContent = degraded.length === 1
+  return degraded.length === 1
     ? (degraded[0].note?.trim() || `Es gibt momentan Störungen im Bereich ${degraded[0].label}.`)
     : `Es gibt momentan Störungen in mehreren Bereichen: ${degraded.map((c) => c.label).join(", ")}.`;
-  banner.classList.remove("hidden");
+}
+
+function renderDashboardIncidentBanner() {
+  const container = $("dashboard-incident-banner");
+  if (!container) return;
+
+  if (incidentBannerDismissed) {
+    container.innerHTML = "";
+    return;
+  }
+
+  const message = incidentMessageFor(lastSystemStatus);
+  if (!message) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="compact-row no-icon" style="background:var(--red);color:white;border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <span>${escapeHTML(message)}</span>
+      <button type="button" id="dashboard-incident-dismiss" style="border:0;background:none;color:white;font-size:18px;line-height:1;cursor:pointer;padding:2px 4px;" aria-label="Hinweis schließen">×</button>
+    </div>`;
+  $("dashboard-incident-dismiss")?.addEventListener("click", () => {
+    incidentBannerDismissed = true;
+    renderDashboardIncidentBanner();
+  });
+}
+
+function showIncidentBanner(status) {
+  lastSystemStatus = status;
+  renderDashboardIncidentBanner();
 }
 
 async function checkMaintenanceMode() {
@@ -4040,11 +4059,6 @@ async function checkMaintenanceMode() {
     return false;
   }
 }
-
-$("incident-banner-close")?.addEventListener("click", () => {
-  incidentBannerDismissed = true;
-  $("incident-banner")?.classList.add("hidden");
-});
 
 updateOnlineStatus();
 (async () => {

@@ -103,22 +103,6 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   font-weight: 750;
 }
 
-.incident-banner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
-
-.incident-banner #incident-banner-close {
-  border: 0;
-  background: none;
-  color: white;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 4px;
-}
 
 .brand-mark {
   width: 38px;
