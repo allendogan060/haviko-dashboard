@@ -3990,6 +3990,38 @@ window.addEventListener("popstate", () => {
   window.scrollTo({ top: 0, behavior: "auto" });
 });
 
+let incidentBannerDismissed = false;
+
+function showIncidentBanner(status) {
+  const banner = $("incident-banner");
+  const text = $("incident-banner-text");
+  if (!banner || !text) return;
+
+  if (status?.maintenance_mode || incidentBannerDismissed) {
+    banner.classList.add("hidden");
+    return;
+  }
+
+  const globalMessage = status?.globalIncidentMessage?.trim();
+  if (globalMessage) {
+    text.textContent = globalMessage;
+    banner.classList.remove("hidden");
+    return;
+  }
+
+  const components = Array.isArray(status?.components) ? status.components : [];
+  const degraded = components.filter((c) => !c.isOperational);
+  if (degraded.length === 0) {
+    banner.classList.add("hidden");
+    return;
+  }
+
+  text.textContent = degraded.length === 1
+    ? (degraded[0].note?.trim() || `Es gibt momentan Störungen im Bereich ${degraded[0].label}.`)
+    : `Es gibt momentan Störungen in mehreren Bereichen: ${degraded.map((c) => c.label).join(", ")}.`;
+  banner.classList.remove("hidden");
+}
+
 async function checkMaintenanceMode() {
   try {
     const status = await rpc("get_system_status");
@@ -4002,11 +4034,17 @@ async function checkMaintenanceMode() {
       $("boot-shell")?.classList.add("hidden");
       document.body.classList.remove("is-booting");
     }
+    showIncidentBanner(status);
     return active;
   } catch {
     return false;
   }
 }
+
+$("incident-banner-close")?.addEventListener("click", () => {
+  incidentBannerDismissed = true;
+  $("incident-banner")?.classList.add("hidden");
+});
 
 updateOnlineStatus();
 (async () => {
