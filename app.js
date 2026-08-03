@@ -692,12 +692,12 @@ async function loadWorkspace(restaurantID = null) {
   app.data = normalizeState(result.state);
   app.updatedAt = result.updatedAt;
   saveLastRestaurant(result.restaurantId);
-  if (IS_LOGIN_HOST) {
-    window.location.replace(DASHBOARD_URL);
-    return;
-  }
   showWorkspace();
   setSyncState("ready", "Aktuell");
+}
+
+function redirectToDashboardIfOnLoginHost() {
+  if (IS_LOGIN_HOST) window.location.replace(DASHBOARD_URL);
 }
 
 async function checkSessionStillValid() {
@@ -3816,6 +3816,7 @@ async function login(event) {
       throw new Error("Gerätezugänge können sich nicht im Web-Dashboard anmelden.");
     }
     await loadWorkspace(session.restaurant_id);
+    redirectToDashboardIfOnLoginHost();
     const isDeviceAccess = app.data.devices.some(
       (device) =>
         String(device.loginName || device.name).localeCompare(
@@ -3857,6 +3858,7 @@ async function register(event) {
     if (!session?.restaurant_id) throw new Error("Restaurant konnte nicht erstellt werden.");
     await initializeRestaurantState(session);
     await loadWorkspace(session.restaurant_id);
+    redirectToDashboardIfOnLoginHost();
     toast("Restaurant erstellt", `Deine Kennung lautet ${session.restaurant_code}.`, "success");
   } catch (caught) {
     error.textContent = friendlyError(caught);
@@ -3932,6 +3934,7 @@ async function start() {
     app.session = stored;
     await ensureSession();
     await loadWorkspace(readLastRestaurant());
+    redirectToDashboardIfOnLoginHost();
   } catch {
     clearSession();
     if (IS_DASHBOARD_HOST) window.location.replace(LOGIN_URL);
