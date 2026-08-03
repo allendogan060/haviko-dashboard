@@ -967,20 +967,50 @@ dialog::backdrop { background: rgba(7,28,23,0.52); backdrop-filter: blur(3px); }
   }
 }
 
-.haviko-footer {
+.site-footer {
   grid-column: 1 / -1;
+  padding:
+    28px
+    22px
+    max(28px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
+  background: white;
+}
+
+.footer-inner {
+  width: min(100%, var(--content, 100%));
+  margin: 0 auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 6px 18px;
-  padding: 18px 22px max(18px, env(safe-area-inset-bottom));
-  font-size: 13px;
-  color: var(--muted);
 }
-.haviko-footer-brand { font-weight: 400; }
-.haviko-footer-brand strong { font-weight: 800; color: var(--forest-deep); }
-.haviko-footer-links { display: flex; flex-wrap: wrap; gap: 14px; }
-.haviko-footer-links a:link, .haviko-footer-links a:visited { color: var(--muted); text-decoration: none; }
-.haviko-footer-links a:hover { color: var(--forest-deep); }
+
+.footer-brand {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.footer-brand strong {
+  color: var(--forest-deep);
+  font-weight: 800;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.footer-links a:link,
+.footer-links a:visited {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.footer-links a:hover {
+  color: var(--forest-deep);
+}
