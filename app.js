@@ -2084,15 +2084,6 @@ function renderSettings() {
         </div>
       </section>
       <section class="section">
-        <header class="section-header"><h2>Technische Kassenbereitschaft</h2></header>
-        <div class="section-body compact-list">
-          ${settingStatus("Testmodus", fiscal.isTestMode ? "Aktiv" : "Aus", !fiscal.isTestMode)}
-          ${settingStatus("TSE", fiscal.fiscalizationState === "ready" ? "Bereit" : "Nicht konfiguriert", fiscal.fiscalizationState === "ready")}
-          ${settingStatus("DSFinV-K", fiscal.dsfinvKVersion || "2.4", Boolean(fiscal.dsfinvKVersion))}
-          <p class="field-hint">Web-Zahlungen bleiben gesperrt, solange keine zertifizierte TSE angebunden ist.</p>
-        </div>
-      </section>
-      <section class="section">
         <header class="section-header"><h2>Betriebstag</h2>${cashDay ? `<span class="badge ${sameDay(cashDay.businessDate) ? "green" : "warning"}">${sameDay(cashDay.businessDate) ? "Heute geöffnet" : "Vortag offen"}</span>` : `<span class="badge">Geschlossen</span>`}</header>
         <div class="section-body">
           ${cashDay ? `
