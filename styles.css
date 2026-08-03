@@ -968,6 +968,8 @@ dialog::backdrop { background: rgba(7,28,23,0.52); backdrop-filter: blur(3px); }
 }
 
 .haviko-footer {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -980,5 +982,5 @@ dialog::backdrop { background: rgba(7,28,23,0.52); backdrop-filter: blur(3px); }
 .haviko-footer-brand { font-weight: 400; }
 .haviko-footer-brand strong { font-weight: 800; color: var(--forest-deep); }
 .haviko-footer-links { display: flex; flex-wrap: wrap; gap: 14px; }
-.haviko-footer-links a { color: var(--muted); text-decoration: none; }
+.haviko-footer-links a:link, .haviko-footer-links a:visited { color: var(--muted); text-decoration: none; }
 .haviko-footer-links a:hover { color: var(--forest-deep); }
