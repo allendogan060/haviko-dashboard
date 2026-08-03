@@ -339,6 +339,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 .sidebar-user { margin-top: auto; display: grid; gap: 3px; padding: 14px 9px 2px; border-top: 1px solid rgba(255,255,255,0.08); }
 .sidebar-user span { color: rgba(255,255,255,0.45); font-size: 12px; }
 .sidebar-user .quiet { justify-self: start; min-height: 34px; padding: 6px 0; color: rgba(255,255,255,0.7); font-weight: 600; }
+.sidebar-user-identity { display: grid; gap: 3px; justify-items: start; padding: 4px 0; background: none; border: 0; cursor: pointer; text-align: left; }
+.sidebar-user-identity:hover strong { text-decoration: underline; }
+.sidebar-user-identity strong { color: white; }
+.sidebar-user-identity span { color: rgba(255,255,255,0.45); font-size: 12px; }
 
 .workspace { min-width: 0; }
 .workspace-header {
@@ -440,6 +444,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 .metric-symbol { color: var(--action); font-size: 19px; }
 
 .split-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.65fr); gap: 16px; }
+.settings-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .section {
   min-width: 0;
   margin-bottom: 16px;
@@ -1014,3 +1019,15 @@ dialog::backdrop { background: rgba(7,28,23,0.52); backdrop-filter: blur(3px); }
 .footer-links a:hover {
   color: var(--forest-deep);
 }
+
+.sidebar-footer {
+  display: grid;
+  gap: 8px;
+  padding: 14px 9px max(14px, env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.sidebar-footer .footer-brand { color: rgba(255,255,255,0.45); font-size: 11px; }
+.sidebar-footer .footer-brand strong { color: rgba(255,255,255,0.75); }
+.sidebar-footer .footer-links { justify-content: flex-start; gap: 10px; font-size: 11px; }
+.sidebar-footer .footer-links a:link, .sidebar-footer .footer-links a:visited { color: rgba(255,255,255,0.45); }
+.sidebar-footer .footer-links a:hover { color: white; }

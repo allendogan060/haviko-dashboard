@@ -2075,7 +2075,7 @@ function renderSettings() {
   if (!app.fiscalStatus) loadFiscalStatus();
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Einstellungen</h2><p>Restaurant, Online-Buchung und Kassenvorbereitung.</p></div></div>
-    <div class="split-layout">
+    <div class="settings-layout">
       <section class="section">
         <header class="section-header"><h2>Restaurant</h2></header>
         <div class="section-body">
@@ -3953,6 +3953,7 @@ $("register-form").addEventListener("submit", register);
 $("login-tab").addEventListener("click", () => switchAuth("login"));
 $("register-tab").addEventListener("click", () => switchAuth("register"));
 $("logout-button").addEventListener("click", logout);
+$("sidebar-profile-button")?.addEventListener("click", () => navigate("settings"));
 $("restaurant-button").addEventListener("click", openAccountMenu);
 $("refresh-button").addEventListener("click", () => loadWorkspace(app.workspace.restaurantId));
 $("gate-form").addEventListener("submit", submitGate);
