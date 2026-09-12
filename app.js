@@ -6,8 +6,6 @@ const GERMAN_FEDERAL_STATES = [
 const SUPABASE_URL = "https://dlapwemckfhxklytbqkk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_VeeQLARNn-sULZ4snvp3HA_Hd78H5RN";
 const DEVELOPMENT_MODE = true;
-const DEVELOPMENT_PIN_HASH =
-  "763f0a51a8e57db6ca611f045f3c5acc85075b79cedebf010f0d2277fb966c3e";
 const AUTH_STORAGE_KEY = "servora-web-session";
 const LAST_RESTAURANT_KEY = "servora-web-restaurant";
 const SHARED_SESSION_COOKIE = "haviko_web_session";
@@ -409,14 +407,6 @@ async function ensureSession() {
     }
   }
   return createAnonymousSession();
-}
-
-async function sha256(value) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function defaultState(session) {
@@ -1016,7 +1006,7 @@ function renderOverview() {
     <div id="dashboard-incident-banner"></div>
     <div id="weather-widget"></div>
     <div class="metric-grid">
-      ${metric("Umsatz heute", formatCurrency(revenue), canManage() ? "Erfasste Zahlungen" : "Für deine Rolle")}
+      ${canManage() ? metric("Umsatz heute", formatCurrency(revenue), "Erfasste Zahlungen") : metric("Umsatz heute", "—", "Nur für Restaurantleitung")}
       ${metric("Reservierungen", String(todayReservations.length), `${todayReservations.reduce((sum, item) => sum + Number(item.guests || 0), 0)} Personen`)}
       ${metric("Aktive Tische", String(activeTables.length), `${app.data.tables.length} Tische insgesamt`)}
       ${metric("Offene Bons", String(openTickets.length), `${openTickets.filter((ticket) => ticket.status === "Fertig").length} abholbereit`)}
@@ -3906,15 +3896,6 @@ function switchAuth(mode) {
     : "Starte leer und richte deinen Betrieb anschließend ein.";
 }
 
-async function submitGate(event) {
-  event.preventDefault();
-  const valid = (await sha256($("gate-pin").value)) === DEVELOPMENT_PIN_HASH;
-  $("gate-error").classList.toggle("hidden", valid);
-  if (!valid) return;
-  $("development-gate").classList.add("hidden");
-  await start();
-}
-
 function updateOnlineStatus() {
   $("offline-banner").classList.toggle("hidden", navigator.onLine);
   if (!navigator.onLine) setSyncState("error", "Offline");
@@ -3959,7 +3940,6 @@ $("logout-button").addEventListener("click", logout);
 $("sidebar-profile-button")?.addEventListener("click", () => navigate("settings"));
 $("restaurant-button").addEventListener("click", openAccountMenu);
 $("refresh-button").addEventListener("click", () => loadWorkspace(app.workspace.restaurantId));
-$("gate-form").addEventListener("submit", submitGate);
 $("view").addEventListener("change", (event) => {
   if (event.target.id === "reservation-date") {
     app.reservationDate = event.target.value;
@@ -4061,11 +4041,13 @@ updateOnlineStatus();
   setInterval(checkMaintenanceMode, 30000);
   setInterval(checkSessionStillValid, 30000);
   if (underMaintenance) return;
+  // access.js (loaded in <head>, before this module runs) is the real gate -
+  // it already redirects unauthorized visitors away. This check is a
+  // defense-in-depth fallback in case app.js is ever loaded on its own.
   if (
     !DEVELOPMENT_MODE ||
     readCookie("haviko_preview_access") === "granted"
   ) {
-    $("development-gate").classList.add("hidden");
     start();
   } else {
     window.location.replace(
