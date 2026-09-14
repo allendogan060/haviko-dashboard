@@ -1310,8 +1310,8 @@ function renderReservations() {
 function statusBadge(status) {
   const type =
     ["Geplant", "Zu bestätigen"].includes(status) ? "blue" :
-    status === "Platziert" ? "green" :
-    ["Storniert", "Nicht erschienen"].includes(status) ? "red" :
+    ["Platziert", "Aktiv"].includes(status) ? "green" :
+    ["Storniert", "Nicht erschienen", "Deaktiviert"].includes(status) ? "red" :
     status === "Warteliste" ? "purple" : "";
   return `<span class="badge ${type}">${escapeHTML(status)}</span>`;
 }
@@ -1424,15 +1424,21 @@ function renderTeam() {
     <section class="section table-section">
       <div class="section-heading"><div><p class="eyebrow">Persönliche Zugänge</p><h3>Mitarbeiter</h3></div></div>
       <table class="data-table">
-        <thead><tr><th>Name und Anmeldung</th><th>Rolle</th><th>Telefon</th><th></th></tr></thead>
+        <thead><tr><th>Name und Anmeldung</th><th>Rolle</th><th>Status</th><th>Telefon</th><th></th></tr></thead>
         <tbody>
-          ${visibleTeam.map((member) => `
-            <tr>
+          ${visibleTeam.map((member) => {
+            // Optional-safe wie im iOS-Model: fehlt das Feld (ältere
+            // Daten), gilt das Konto als aktiv.
+            const isActive = member.isActive !== false;
+            return `
+            <tr${isActive ? "" : ' class="is-disabled"'}>
               <td><strong>${escapeHTML(member.name)}</strong></td>
               <td>${statusBadge(member.role)}</td>
+              <td>${statusBadge(isActive ? "Aktiv" : "Deaktiviert")}</td>
               <td>${escapeHTML(member.phone || "–")}</td>
               <td><div class="row-actions"><button class="row-button" type="button" data-member-id="${member.id}">Bearbeiten</button></div></td>
-            </tr>`).join("")}
+            </tr>`;
+          }).join("")}
         </tbody>
       </table>
     </section>
@@ -1907,6 +1913,19 @@ function fiscalReceiptNumberGaps() {
   return gaps;
 }
 
+const fiscalStateTitles = {
+  notConfigured: "Nicht eingerichtet",
+  testMode: "Testmodus",
+  ready: "Bereit",
+  error: "Fehler",
+  offline: "Offline"
+};
+
+function fiscalizationBadge(state) {
+  const type = state === "ready" ? "green" : state === "testMode" ? "blue" : state === "error" ? "red" : "";
+  return `<span class="badge ${type}">${escapeHTML(fiscalStateTitles[state] || state || "–")}</span>`;
+}
+
 function renderReports() {
   const sessions = [...app.data.cashDaySessions]
     .filter((session) => session.status === "closed")
@@ -1914,10 +1933,28 @@ function renderReports() {
   const shiftRecords = [...app.data.shiftRecords].sort(
     (a, b) => dateFromSwift(b.start) - dateFromSwift(a.start)
   );
+  const receipts = [...app.data.fiscalReceipts].sort(
+    (a, b) => dateFromSwift(b.createdAt) - dateFromSwift(a.createdAt)
+  );
   const receiptGaps = fiscalReceiptNumberGaps();
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Berichte</h2><p>Tagesabschlüsse und Schichtauswertungen.</p></div></div>
     ${receiptGaps.length ? `<div class="compact-row no-icon" style="background:var(--orange-soft, #fff0e8);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>Lücke in der Belegnummerierung</strong><span>${escapeHTML(receiptGaps.join(", "))} · kann bedeuten, dass ein Beleg beim Speichern fehlgeschlagen ist.</span></div></div>` : ""}
+    <section class="section table-section">
+      <header class="section-header"><h2>Belege</h2><span class="badge">${receipts.length}</span></header>
+      ${receipts.length ? `<table class="data-table">
+        <thead><tr><th>Rechnungsnummer</th><th>Datum</th><th>Betrag</th><th>Zahlungsart</th><th>TSE-Status</th><th></th></tr></thead>
+        <tbody>${receipts.slice(0, 60).map((receipt) => `
+          <tr>
+            <td><strong>${escapeHTML(receipt.invoiceNumber || "–")}</strong></td>
+            <td>${formatDate(receipt.createdAt, { dateStyle: "medium", timeStyle: "short" })}</td>
+            <td>${formatCurrency(receipt.grossAmount)}</td>
+            <td>${escapeHTML(receipt.paymentMethodName || "–")}</td>
+            <td>${fiscalizationBadge(receipt.fiscalizationState)}</td>
+            <td><button class="row-button" type="button" data-receipt-id="${escapeHTML(receipt.id)}">Details</button></td>
+          </tr>`).join("")}</tbody>
+      </table>` : emptyHTML("Noch keine Belege", "Nach der ersten Zahlung erscheint hier der Beleg.")}
+    </section>
     <section class="section table-section">
       <header class="section-header"><h2>Tagesberichte</h2><span class="badge">${sessions.length}</span></header>
       ${sessions.length ? `<table class="data-table">
@@ -2013,6 +2050,36 @@ function openShiftReport(recordID) {
         <div><span>Arbeitszeit</span><strong>${durationText(workedSeconds(record))}</strong></div>
         <div><span>Zahlungen</span><strong>${payments.length}</strong></div>
         <div><span>Umsatz</span><strong>${formatCurrency(revenue)}</strong></div>
+      </div>
+    `,
+    footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
+  });
+}
+
+function openReceiptDetail(receiptID) {
+  const receipt = app.data.fiscalReceipts.find((item) => item.id === receiptID);
+  if (!receipt) return;
+  const items = Array.isArray(receipt.items) ? receipt.items : [];
+  openModal({
+    eyebrow: "Beleg",
+    title: receipt.invoiceNumber || "Beleg",
+    body: `
+      <div class="detail-list">
+        <div><span>Datum</span><strong>${formatDate(receipt.createdAt, { dateStyle: "medium", timeStyle: "short" })}</strong></div>
+        <div><span>Betrag</span><strong>${formatCurrency(receipt.grossAmount)}</strong></div>
+        <div><span>Zahlungsart</span><strong>${escapeHTML(receipt.paymentMethodName || "–")}</strong></div>
+        <div><span>Quelle</span><strong>${escapeHTML(receipt.sourceName || "–")}</strong></div>
+        <div><span>Status</span><strong>${fiscalizationBadge(receipt.fiscalizationState)}</strong></div>
+      </div>
+      ${items.length ? `<div class="activity-list">${items.map((item) => `
+        <article class="activity-row no-icon"><div class="activity-copy"><strong>${item.quantity}× ${escapeHTML(item.name)}</strong><span>${Number(item.taxRate || 0)}% MwSt.</span></div><strong>${formatCurrency(Number(item.unitPrice || 0) * Number(item.quantity || 0))}</strong></article>`).join("")}</div>` : ""}
+      <h3 class="modal-subheading">TSE</h3>
+      <div class="detail-list">
+        <div><span>Kassen-Ser.-Nr.</span><strong>${escapeHTML(receipt.cashRegisterSerialNumber || "–")}</strong></div>
+        <div><span>TSE-Ser.-Nr.</span><strong>${escapeHTML(receipt.tseSerialNumber || "–")}</strong></div>
+        <div><span>Transaktion Nr.</span><strong>${receipt.tseTransactionNumber ?? "–"}</strong></div>
+        <div><span>Signaturzähler</span><strong>${receipt.tseSignatureCounter ?? "–"}</strong></div>
+        <div><span>Signatur</span><strong style="word-break:break-all;">${escapeHTML(receipt.tseSignature || "–")}</strong></div>
       </div>
     `,
     footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
@@ -3154,7 +3221,7 @@ function openScheduledShiftEditor() {
       <form id="scheduled-shift-form">
         <label class="field"><span>Mitarbeiter</span><select id="scheduled-shift-member" required>
           <option value="">Bitte auswählen</option>
-          ${app.data.team.map((member) => `<option value="${member.id}">${escapeHTML(member.name)} · ${escapeHTML(member.role)}</option>`).join("")}
+          ${app.data.team.filter((member) => member.isActive !== false).map((member) => `<option value="${member.id}">${escapeHTML(member.name)} · ${escapeHTML(member.role)}</option>`).join("")}
         </select></label>
         <div class="field-grid">
           <label class="field"><span>Beginn</span><input id="scheduled-shift-start" type="datetime-local" step="900" value="${localDateInput(start)}T${start.toTimeString().slice(0, 5)}" required></label>
@@ -3694,6 +3761,8 @@ function handleViewClick(event) {
   if (cashDayID) return openCashDayReport(cashDayID);
   const shiftReportID = event.target.closest("[data-shift-report-id]")?.dataset.shiftReportId;
   if (shiftReportID) return openShiftReport(shiftReportID);
+  const receiptID = event.target.closest("[data-receipt-id]")?.dataset.receiptId;
+  if (receiptID) return openReceiptDetail(receiptID);
   const area = event.target.closest("[data-area]")?.dataset.area;
   if (area) {
     app.tableArea = area;
