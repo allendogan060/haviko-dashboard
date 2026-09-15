@@ -356,8 +356,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
   gap: 20px;
   padding: 13px clamp(18px, 3vw, 38px);
   border-bottom: 1px solid var(--line);
-  background: rgba(255,255,255,0.92);
-  backdrop-filter: blur(18px);
+  background: var(--surface);
 }
 
 .workspace-header h1 { margin: 0; font-size: 25px; }
@@ -562,7 +561,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 .sparkline-bar span { margin-top: 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; }
 
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-.filter-button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 16px; background: white; color: var(--muted); font-size: 12px; font-weight: 750; }
+.filter-button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--muted); font-size: 12px; font-weight: 750; }
 .filter-button.selected { border-color: var(--action); background: var(--action-soft); color: var(--action); }
 
 .ticket-board { display: grid; grid-template-columns: repeat(3, minmax(250px, 1fr)); gap: 12px; overflow-x: auto; }
@@ -602,7 +601,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 }
 .row-button { min-height: 32px; max-width: 100%; border: 1px solid var(--line); border-radius: 5px; background: white; padding: 5px 9px; font-size: 12px; font-weight: 700; line-height: 1.2; }
 
-.badge { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border-radius: 12px; padding: 4px 8px; background: var(--surface-muted); color: var(--muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
+.badge { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border-radius: 5px; padding: 4px 8px; background: var(--surface-muted); color: var(--muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .badge.green { background: var(--action-soft); color: var(--action); }
 .badge.orange { background: var(--orange-soft); color: #b55429; }
 .badge.red { background: var(--red-soft); color: var(--red); }
@@ -853,8 +852,7 @@ dialog::backdrop { background: rgba(7,28,23,0.52); backdrop-filter: blur(3px); }
     gap: 4px;
     padding: 8px 8px env(safe-area-inset-bottom);
     border-top: 1px solid var(--line);
-    background: rgba(255,255,255,0.95);
-    backdrop-filter: blur(20px);
+    background: var(--surface);
   }
   .mobile-navigation .nav-button {
     min-width: 0;

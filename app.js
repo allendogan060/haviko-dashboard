@@ -1648,7 +1648,7 @@ function renderShifts() {
       ${planned.length ? `<table class="data-table">
         <thead><tr><th>Mitarbeiter</th><th>Datum</th><th>Beginn</th><th>Ende</th><th>Notiz</th></tr></thead>
         <tbody>${planned.slice(0, 50).map((shift) => `
-          <tr><td><strong>${escapeHTML(shift.memberName)}</strong></td><td>${formatDate(shift.start, { dateStyle: "medium" })}</td><td>${formatDate(shift.start, { hour: "2-digit", minute: "2-digit" })}</td><td>${formatDate(shift.end, { hour: "2-digit", minute: "2-digit" })}</td><td>${escapeHTML(shift.note || "–")}</td></tr>`).join("")}</tbody>
+          <tr><td>${memberNameBadge(shift.memberID, shift.memberName)}</td><td>${formatDate(shift.start, { dateStyle: "medium" })}</td><td>${formatDate(shift.start, { hour: "2-digit", minute: "2-digit" })}</td><td>${formatDate(shift.end, { hour: "2-digit", minute: "2-digit" })}</td><td>${escapeHTML(shift.note || "–")}</td></tr>`).join("")}</tbody>
       </table>` : emptyHTML("Noch keine geplanten Schichten", "Die Restaurantleitung kann hier den Dienstplan aufbauen.")}
     </section>
     <section class="section table-section">
@@ -1656,10 +1656,20 @@ function renderShifts() {
       ${records.length ? `<table class="data-table">
         <thead><tr><th>Mitarbeiter</th><th>Datum</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeitszeit</th></tr></thead>
         <tbody>${records.slice(0, 30).map((record) => `
-          <tr><td>${escapeHTML(app.data.team.find((member) => member.id === record.memberID)?.name || "Mitarbeiter")}</td><td>${formatDate(record.start, { dateStyle: "medium" })}</td><td>${formatDate(record.start, { hour: "2-digit", minute: "2-digit" })}</td><td>${formatDate(record.end, { hour: "2-digit", minute: "2-digit" })}</td><td>${durationText(record.breakDuration || 0)}</td><td><strong>${durationText(workedSeconds(record))}</strong></td></tr>`).join("")}</tbody>
+          <tr><td>${memberNameBadge(record.memberID)}</td><td>${formatDate(record.start, { dateStyle: "medium" })}</td><td>${formatDate(record.start, { hour: "2-digit", minute: "2-digit" })}</td><td>${formatDate(record.end, { hour: "2-digit", minute: "2-digit" })}</td><td>${durationText(record.breakDuration || 0)}</td><td><strong>${durationText(workedSeconds(record))}</strong></td></tr>`).join("")}</tbody>
       </table>` : emptyHTML("Noch keine Schichten", "Nach dem Ausstempeln erscheint deine Arbeitszeit hier.")}
     </section>
   `;
+}
+
+// Small colored dot per role (same roleColor() used by the Team card view)
+// next to the name, so Dienstplan/Schichtberichte read at a glance who does
+// what - matches the colored role-corner idea from the reference UI.
+function memberNameBadge(memberID, fallbackName) {
+  const member = app.data.team.find((item) => item.id === memberID);
+  const name = escapeHTML(member?.name || fallbackName || "Mitarbeiter");
+  if (!member) return `<strong>${name}</strong>`;
+  return `<span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:8px;height:8px;border-radius:50%;background:${roleColor(member.role)};flex:0 0 auto;"></span><strong>${name}</strong></span>`;
 }
 
 function guestKeyFor(reservation) {
