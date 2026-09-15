@@ -983,6 +983,59 @@ function upcomingHoliday(days = 7) {
     .sort((a, b) => a.date - b.date)[0] || null;
 }
 
+// Last 7 days vs the 7 days before that - a lightweight week-over-week
+// trend for the Start tab, distinct from the deeper renderAnalytics()/
+// renderReports() screens which cover much longer ranges.
+function weeklyRevenueTrend() {
+  const days = [];
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const day = new Date();
+    day.setDate(day.getDate() - offset);
+    const total = app.data.paymentRecords
+      .filter((payment) => sameDay(payment.createdAt, localDateInput(day)))
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    days.push({ date: day, total });
+  }
+  const thisWeekTotal = days.reduce((sum, day) => sum + day.total, 0);
+  let lastWeekTotal = 0;
+  for (let offset = 13; offset >= 7; offset -= 1) {
+    const day = new Date();
+    day.setDate(day.getDate() - offset);
+    lastWeekTotal += app.data.paymentRecords
+      .filter((payment) => sameDay(payment.createdAt, localDateInput(day)))
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  }
+  const changePercent = lastWeekTotal > 0
+    ? Math.round(((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100)
+    : (thisWeekTotal > 0 ? 100 : 0);
+  return { days, thisWeekTotal, lastWeekTotal, changePercent };
+}
+
+function renderWeeklyTrendSection() {
+  const trend = weeklyRevenueTrend();
+  const maxDay = Math.max(1, ...trend.days.map((day) => day.total));
+  const changeLabel = trend.changePercent > 0 ? `+${trend.changePercent}%` : `${trend.changePercent}%`;
+  const changeClass = trend.changePercent > 0 ? "green" : trend.changePercent < 0 ? "red" : "";
+  return `
+    <section class="section">
+      <header class="section-header"><div><h2>Woche im Vergleich</h2><span>Letzte 7 Tage vs. die 7 Tage davor</span></div>${canManage() ? `<span class="badge ${changeClass}">${changeLabel}</span>` : ""}</header>
+      <div class="section-body">
+        ${canManage() ? `
+          <div class="sparkline">
+            ${trend.days.map((day) => `
+              <div class="sparkline-bar" style="--bar-height:${Math.max(4, Math.round((day.total / maxDay) * 100))}%" title="${escapeHTML(formatDate(day.date, { dateStyle: "medium" }))}: ${escapeHTML(formatCurrency(day.total))}">
+                <span>${day.date.toLocaleDateString("de-DE", { weekday: "short" }).replace(".", "")}</span>
+              </div>`).join("")}
+          </div>
+          <div class="compact-list">
+            ${settingStatus("Diese Woche", formatCurrency(trend.thisWeekTotal), true)}
+            ${settingStatus("Vorherige Woche", formatCurrency(trend.lastWeekTotal), true)}
+          </div>
+        ` : `<p class="field-hint">Umsatzvergleich ist nur für die Restaurantleitung sichtbar.</p>`}
+      </div>
+    </section>`;
+}
+
 function renderOverview() {
   const todayReservations = app.data.reservations.filter(
     (reservation) => sameDay(reservation.time) && !["Storniert", "Nicht erschienen"].includes(reservation.status)
@@ -1018,6 +1071,7 @@ function renderOverview() {
       ${metric("Aktive Tische", String(activeTables.length), `${app.data.tables.length} Tische insgesamt`)}
       ${metric("Offene Bons", String(openTickets.length), `${openTickets.filter((ticket) => ticket.status === "Fertig").length} abholbereit`)}
     </div>
+    ${renderWeeklyTrendSection()}
     <div class="split-layout">
       <section class="section">
         <header class="section-header"><div><h2>Heute im Betrieb</h2><span>Live aus Haviko</span></div></header>

@@ -548,6 +548,19 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 }
 .member-card-name { font-size: 13.5px; }
 
+.sparkline { display: flex; align-items: flex-end; gap: 8px; height: 110px; padding: 10px 4px 0; margin-bottom: 14px; }
+.sparkline-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.sparkline-bar::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: var(--bar-height, 4%);
+  min-height: 3px;
+  border-radius: 4px 4px 0 0;
+  background: var(--action);
+}
+.sparkline-bar span { margin-top: 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; }
+
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .filter-button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 16px; background: white; color: var(--muted); font-size: 12px; font-weight: 750; }
 .filter-button.selected { border-color: var(--action); background: var(--action-soft); color: var(--action); }
