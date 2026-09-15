@@ -547,6 +547,25 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 }
 .member-card-name { font-size: 13.5px; }
 
+.schedule-grid { table-layout: fixed; }
+.schedule-grid th:first-child, .schedule-grid td:first-child { width: 160px; }
+.schedule-grid th { text-align: center; }
+.schedule-grid th:first-child { text-align: left; }
+.schedule-grid td { padding: 6px; text-align: center; }
+.schedule-cell {
+  width: 100%;
+  min-height: 40px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: white;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px;
+}
+.schedule-cell:hover { border-style: solid; }
+.schedule-cell.filled { border-style: solid; color: var(--ink); }
+
 .sparkline { display: flex; align-items: flex-end; gap: 8px; height: 110px; padding: 10px 4px 0; margin-bottom: 14px; }
 .sparkline-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .sparkline-bar::before {

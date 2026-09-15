@@ -36,6 +36,7 @@ const app = {
   tableViewMode: "grid",
   teamViewMode: "grid",
   settingsTab: "restaurant",
+  scheduleWeekOffset: 0,
   orderCart: [],
   orderTableID: null,
   reviews: [],
@@ -1606,6 +1607,68 @@ function staffingSuggestions() {
   return suggestions;
 }
 
+// Monday-first week, matching the app's Wochenplan-Editor.
+function scheduleWeekDays(offset) {
+  const now = new Date();
+  const day = now.getDay(); // 0 = Sonntag .. 6 = Samstag
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMonday + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return date;
+  });
+}
+
+function renderScheduleGrid() {
+  const days = scheduleWeekDays(app.scheduleWeekOffset || 0);
+  const members = app.data.team.filter((member) => member.isActive !== false);
+  const rangeLabel = `${days[0].toLocaleDateString("de-DE", { day: "numeric", month: "short" })} – ${days[6].toLocaleDateString("de-DE", { day: "numeric", month: "short" })}`;
+  return `
+    <section class="section table-section">
+      <header class="section-header">
+        <h2>Dienstplan</h2>
+        <div class="tool-actions" style="margin:0;">
+          <button class="row-button" type="button" data-week-offset="prev">←</button>
+          <span class="badge">${rangeLabel}</span>
+          <button class="row-button" type="button" data-week-offset="today">Heute</button>
+          <button class="row-button" type="button" data-week-offset="next">→</button>
+        </div>
+      </header>
+      <div class="section-body" style="overflow-x:auto;">
+        ${members.length ? `<table class="data-table schedule-grid">
+          <thead>
+            <tr>
+              <th>Mitarbeiter</th>
+              ${days.map((date) => `<th>${date.toLocaleDateString("de-DE", { weekday: "short" }).replace(".", "")}<br><span class="muted">${date.toLocaleDateString("de-DE", { day: "numeric", month: "numeric" })}</span></th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${members.map((member) => `
+              <tr>
+                <td>${memberNameBadge(member.id, member.name)}</td>
+                ${days.map((date) => {
+                  const shift = app.data.scheduledShifts.find(
+                    (item) => item.memberID === member.id && sameDay(item.start, localDateInput(date))
+                  );
+                  return `<td>
+                    <button class="schedule-cell${shift ? " filled" : ""}" type="button"
+                      data-schedule-cell="1" data-member-id="${member.id}" data-date="${localDateInput(date)}"
+                      ${shift ? `data-shift-id="${shift.id}"` : ""}
+                      style="${shift ? `border-color:${roleColor(member.role)};background:color-mix(in srgb, ${roleColor(member.role)} 12%, white);` : ""}">
+                      ${shift ? `${formatDate(shift.start, { hour: "2-digit", minute: "2-digit" })}–${formatDate(shift.end, { hour: "2-digit", minute: "2-digit" })}` : "+"}
+                    </button>
+                  </td>`;
+                }).join("")}
+              </tr>`).join("")}
+          </tbody>
+        </table>` : emptyHTML("Noch keine aktiven Mitarbeiter", "Lege zuerst Teammitglieder im Team-Tab an.")}
+      </div>
+    </section>`;
+}
+
 function renderShifts() {
   const activeStart = app.data.activeShiftStart;
   const records = [...app.data.shiftRecords].sort(
@@ -1643,14 +1706,15 @@ function renderShifts() {
             </div></div>`).join("")}
         </div></section>` : "";
     })() : ""}
+    ${canManage() ? renderScheduleGrid() : `
     <section class="section table-section">
-      <header class="section-header"><h2>${canManage() ? "Dienstplan" : "Meine geplanten Schichten"}</h2><span class="badge">${planned.length}</span></header>
+      <header class="section-header"><h2>Meine geplanten Schichten</h2><span class="badge">${planned.length}</span></header>
       ${planned.length ? `<table class="data-table">
         <thead><tr><th>Mitarbeiter</th><th>Datum</th><th>Beginn</th><th>Ende</th><th>Notiz</th></tr></thead>
         <tbody>${planned.slice(0, 50).map((shift) => `
           <tr><td>${memberNameBadge(shift.memberID, shift.memberName)}</td><td>${formatDate(shift.start, { dateStyle: "medium" })}</td><td>${formatDate(shift.start, { hour: "2-digit", minute: "2-digit" })}</td><td>${formatDate(shift.end, { hour: "2-digit", minute: "2-digit" })}</td><td>${escapeHTML(shift.note || "–")}</td></tr>`).join("")}</tbody>
       </table>` : emptyHTML("Noch keine geplanten Schichten", "Die Restaurantleitung kann hier den Dienstplan aufbauen.")}
-    </section>
+    </section>`}
     <section class="section table-section">
       <header class="section-header"><h2>Schichtberichte</h2></header>
       ${records.length ? `<table class="data-table">
@@ -3425,27 +3489,39 @@ function openMemberEditor(memberID = null) {
   });
 }
 
-function openScheduledShiftEditor() {
+function openScheduledShiftEditor(shiftID = null, presetMemberID = null, presetDate = null) {
   if (!canManage()) return;
-  const start = new Date();
-  start.setMinutes(Math.ceil(start.getMinutes() / 15) * 15, 0, 0);
-  const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+  const existing = shiftID ? app.data.scheduledShifts.find((item) => item.id === shiftID) : null;
+  let start = existing ? dateFromSwift(existing.start) : new Date();
+  let end = existing ? dateFromSwift(existing.end) : new Date(start.getTime() + 4 * 60 * 60 * 1000);
+  if (!existing) {
+    if (presetDate) {
+      const [year, month, dayOfMonth] = presetDate.split("-").map(Number);
+      start = new Date(year, month - 1, dayOfMonth, 17, 0, 0, 0);
+    } else {
+      start.setMinutes(Math.ceil(start.getMinutes() / 15) * 15, 0, 0);
+    }
+    end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+  }
   openModal({
     eyebrow: "Dienstplan",
-    title: "Schicht planen",
+    title: existing ? "Schicht bearbeiten" : "Schicht planen",
     body: `
-      <form id="scheduled-shift-form">
+      <form id="scheduled-shift-form" data-id="${existing?.id || ""}">
         <label class="field"><span>Mitarbeiter</span><select id="scheduled-shift-member" required>
           <option value="">Bitte auswählen</option>
-          ${app.data.team.filter((member) => member.isActive !== false).map((member) => `<option value="${member.id}">${escapeHTML(member.name)} · ${escapeHTML(member.role)}</option>`).join("")}
+          ${app.data.team.filter((member) => member.isActive !== false).map((member) => `<option value="${member.id}" ${(existing?.memberID || presetMemberID) === member.id ? "selected" : ""}>${escapeHTML(member.name)} · ${escapeHTML(member.role)}</option>`).join("")}
         </select></label>
         <div class="field-grid">
           <label class="field"><span>Beginn</span><input id="scheduled-shift-start" type="datetime-local" step="900" value="${localDateInput(start)}T${start.toTimeString().slice(0, 5)}" required></label>
           <label class="field"><span>Ende</span><input id="scheduled-shift-end" type="datetime-local" step="900" value="${localDateInput(end)}T${end.toTimeString().slice(0, 5)}" required></label>
         </div>
-        <label class="field"><span>Notiz</span><textarea id="scheduled-shift-note" rows="3"></textarea></label>
+        <label class="field"><span>Notiz</span><textarea id="scheduled-shift-note" rows="3">${escapeHTML(existing?.note || "")}</textarea></label>
       </form>`,
-    footer: `<button class="secondary" type="button" data-modal-action="close">Abbrechen</button><button class="primary" type="button" data-modal-action="save-scheduled-shift">Speichern</button>`
+    footer: `
+      ${existing ? `<button class="danger" type="button" data-modal-action="delete-scheduled-shift" data-id="${existing.id}">Löschen</button>` : ""}
+      <button class="secondary" type="button" data-modal-action="close">Abbrechen</button>
+      <button class="primary" type="button" data-modal-action="save-scheduled-shift">Speichern</button>`
   });
 }
 
@@ -3460,8 +3536,9 @@ async function saveScheduledShift() {
     toast("Nicht gespeichert", "Bitte prüfe Mitarbeiter, Beginn und Ende.", "error");
     return;
   }
+  const existingID = form.dataset.id || null;
   const shift = {
-    id: uuid(),
+    id: existingID || uuid(),
     memberID: member.id,
     memberName: member.name,
     start: swiftDate(start),
@@ -3470,10 +3547,19 @@ async function saveScheduledShift() {
     createdBy: app.workspace.displayName,
     updatedAt: swiftDate()
   };
+  const scheduledShifts = existingID
+    ? app.data.scheduledShifts.map((item) => (item.id === existingID ? shift : item))
+    : [...app.data.scheduledShifts, shift];
   if (await savePatch(
-    { scheduledShifts: [...app.data.scheduledShifts, shift] },
-    "Schicht wurde eingeplant."
+    { scheduledShifts },
+    existingID ? "Schicht wurde aktualisiert." : "Schicht wurde eingeplant."
   )) closeModal();
+}
+
+async function deleteScheduledShift(shiftID) {
+  if (!canManage() || !window.confirm("Diese Schicht wirklich löschen?")) return;
+  const scheduledShifts = app.data.scheduledShifts.filter((item) => item.id !== shiftID);
+  if (await savePatch({ scheduledShifts }, "Schicht wurde gelöscht.")) closeModal();
 }
 
 async function saveMember() {
@@ -4058,6 +4144,23 @@ function handleViewClick(event) {
     renderSettings();
     return;
   }
+  const weekOffset = event.target.closest("[data-week-offset]")?.dataset.weekOffset;
+  if (weekOffset) {
+    if (weekOffset === "today") app.scheduleWeekOffset = 0;
+    else if (weekOffset === "next") app.scheduleWeekOffset = (app.scheduleWeekOffset || 0) + 1;
+    else if (weekOffset === "prev") app.scheduleWeekOffset = (app.scheduleWeekOffset || 0) - 1;
+    renderShifts();
+    return;
+  }
+  const scheduleCell = event.target.closest("[data-schedule-cell]");
+  if (scheduleCell) {
+    openScheduledShiftEditor(
+      scheduleCell.dataset.shiftId || null,
+      scheduleCell.dataset.memberId,
+      scheduleCell.dataset.date
+    );
+    return;
+  }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
   if (action === "add-table") openTableEditor();
@@ -4120,6 +4223,7 @@ function handleModalClick(event) {
   if (action === "save-device") saveDevice();
   if (action === "delete-device") deleteDevice(id);
   if (action === "save-scheduled-shift") saveScheduledShift();
+  if (action === "delete-scheduled-shift" && id) deleteScheduledShift(id);
   if (action === "save-table") saveTable();
   if (action === "save-station") saveStation();
   if (action === "save-printer") savePrinter();
