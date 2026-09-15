@@ -35,6 +35,7 @@ const app = {
   tableArea: "",
   tableViewMode: "grid",
   teamViewMode: "grid",
+  settingsTab: "restaurant",
   orderCart: [],
   orderTableID: null,
   reviews: [],
@@ -2210,135 +2211,201 @@ async function saveKitchenOperatingMode() {
   renderStations();
 }
 
-function renderSettings() {
-  const fiscal = app.data.fiscalConfiguration;
-  const booking = app.data.onlineBookingConfiguration;
+const SETTINGS_TABS = [
+  { id: "restaurant", title: "Restaurant" },
+  { id: "betrieb", title: "Betrieb" },
+  { id: "reservierung", title: "Online-Reservierung" },
+  { id: "kundenbindung", title: "Kundenbindung" },
+  { id: "kasse", title: "Kasse" },
+  { id: "geraete", title: "Geräte & Drucker" }
+];
+
+function settingsRestaurantTab() {
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Restaurant</h2></header>
+      <div class="section-body">
+        <label class="field"><span>Name</span><input value="${escapeHTML(app.data.restaurantName)}" readonly aria-readonly="true"></label>
+        <label class="field"><span>Restaurantkennung</span><input value="${escapeHTML(app.workspace.restaurantCode)}" readonly aria-readonly="true"></label>
+      </div>
+    </section>`;
+}
+
+function settingsBetriebTab() {
   const cashDay = activeCashDay();
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Betriebstag</h2>${cashDay ? `<span class="badge ${sameDay(cashDay.businessDate) ? "green" : "warning"}">${sameDay(cashDay.businessDate) ? "Heute geöffnet" : "Vortag offen"}</span>` : `<span class="badge">Geschlossen</span>`}</header>
+      <div class="section-body">
+        ${cashDay ? `
+          <div class="compact-list">
+            ${settingStatus("Geschäftsdatum", formatDate(cashDay.businessDate, { dateStyle: "long" }), sameDay(cashDay.businessDate))}
+            ${settingStatus("Geöffnet von", cashDay.openedBy || app.workspace.displayName, true)}
+            ${settingStatus("Startbestand", formatCurrency(cashDay.openingFloat), true)}
+          </div>
+          <form id="cash-day-close-form">
+            <label class="field"><span>Gezählter Kassenbestand</span><input id="cash-day-actual" type="number" min="0" step="0.01" required></label>
+            <label class="field"><span>Abschlussnotiz</span><textarea id="cash-day-note"></textarea></label>
+            <button class="danger" type="submit">Tag abschließen</button>
+          </form>` : `
+          <form id="cash-day-open-form">
+            <label class="field"><span>Startbestand</span><input id="cash-day-float" type="number" min="0" step="0.01" value="0" required></label>
+            <button class="primary" type="submit">Tag öffnen</button>
+          </form>`}
+      </div>
+    </section>`;
+}
+
+function settingsReservierungTab() {
+  const booking = app.data.onlineBookingConfiguration;
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Online-Reservierung</h2></header>
+      <div class="section-body">
+        <form id="business-settings-form">
+          <label class="field"><span>Straße</span><input id="business-street" value="${escapeHTML(booking?.restaurant?.street || "")}" autocomplete="address-line1" required></label>
+          <div class="field-grid">
+            <label class="field"><span>Hausnummer</span><input id="business-house-number" value="${escapeHTML(booking?.restaurant?.houseNumber || "")}"></label>
+            <label class="field"><span>Postleitzahl</span><input id="business-postal-code" value="${escapeHTML(booking?.restaurant?.postalCode || "")}" autocomplete="postal-code" required></label>
+          </div>
+          <div class="field-grid">
+            <label class="field"><span>Ort</span><input id="business-city" value="${escapeHTML(booking?.restaurant?.city || "")}" autocomplete="address-level2" required></label>
+            <label class="field"><span>Bundesland</span>
+              <select id="business-state">
+                <option value="" ${!booking?.restaurant?.state ? "selected" : ""}>Keine Angabe</option>
+                ${GERMAN_FEDERAL_STATES.map(state => `<option value="${state}" ${booking?.restaurant?.state === state ? "selected" : ""}>${state}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <label class="field"><span>Land</span>
+            <select id="business-country">
+              <option value="Deutschland" selected>Deutschland</option>
+            </select>
+          </label>
+          <p class="field-hint">Eine vollständige, sauber getrennte Adresse lässt sich zuverlässiger einem Standort zuordnen (u. a. fürs Wetter im Start-Tab).</p>
+          <div class="field-grid">
+            <label class="field"><span>Telefon</span><input id="business-phone" value="${escapeHTML(booking?.restaurant?.phone || "")}" autocomplete="tel"></label>
+            <label class="field"><span>E-Mail</span><input id="business-email" type="email" value="${escapeHTML(booking?.restaurant?.email || "")}" autocomplete="email"></label>
+          </div>
+          <label class="field"><span>Öffnungszeiten-Hinweis</span><textarea id="business-opening-text" placeholder="z. B. Dienstag bis Sonntag, 17:00–23:00 Uhr">${escapeHTML(booking?.restaurant?.openingHoursText || "")}</textarea></label>
+          <label class="check"><input id="business-booking-enabled" type="checkbox" ${booking?.restaurant?.settings?.bookingEnabled ? "checked" : ""}><span>Online-Reservierung veröffentlichen</span></label>
+          <label class="check"><input id="business-auto-confirm" type="checkbox" ${booking?.restaurant?.settings?.automaticConfirmation !== false ? "checked" : ""}><span>Reservierungen automatisch bestätigen</span></label>
+          <label class="check"><input id="business-location-required" type="checkbox" ${booking?.restaurant?.settings?.clockInRequiresLocation ? "checked" : ""}><span>Einstempeln nur am Restaurant erlauben</span></label>
+          <label class="check"><input id="business-outdoor-seating" type="checkbox" ${booking?.restaurant?.settings?.hasOutdoorSeating ? "checked" : ""}><span>Terrasse / Außenbereich vorhanden</span></label>
+          <label class="check"><input id="business-benchmark-optin" type="checkbox" ${booking?.restaurant?.settings?.benchmarkOptIn ? "checked" : ""}><span>Am anonymen Branchenvergleich teilnehmen</span></label>
+          <label class="field"><span>Erlaubter Radius</span><input id="business-location-radius" type="number" min="50" max="1000" step="25" value="${Number(booking?.restaurant?.settings?.clockInRadiusMeters || 150)}"></label>
+          <button class="secondary" type="button" data-action="use-current-location">Aktuellen Standort übernehmen</button>
+          <p class="field-hint">${booking?.restaurant?.settings?.clockInLatitude != null ? "Standort ist hinterlegt." : "Für die Standortprüfung zuerst den Standort übernehmen oder die Adresse in der App bestätigen."}</p>
+          <button class="primary" type="submit">Betriebsdaten speichern</button>
+        </form>
+        ${booking?.publicID ? `<a class="secondary" href="../?r=${encodeURIComponent(booking.publicID)}" target="_blank" rel="noopener">Reservierungsseite öffnen</a>` : ""}
+      </div>
+    </section>`;
+}
+
+function settingsKundenbindungTab() {
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Kundenbindungsprogramm</h2></header>
+      <div class="section-body">
+        <form id="loyalty-settings-form">
+          <label class="check"><input id="loyalty-enabled" type="checkbox" ${app.data.loyaltyConfiguration?.enabled ? "checked" : ""}><span>Stempelkarte aktivieren</span></label>
+          <label class="field"><span>Besuche bis zur Belohnung</span><input id="loyalty-visits-required" type="number" min="1" max="100" step="1" value="${Number(app.data.loyaltyConfiguration?.visitsRequired || 5)}" required></label>
+          <label class="field"><span>Art der Belohnung</span>
+            <select id="loyalty-reward-kind">
+              <option value="freeProduct" ${(app.data.loyaltyConfiguration?.rewardKind || "freeProduct") === "freeProduct" ? "selected" : ""}>Gratis Produkt</option>
+              <option value="discount" ${app.data.loyaltyConfiguration?.rewardKind === "discount" ? "selected" : ""}>Rabatt</option>
+              <option value="voucher" ${app.data.loyaltyConfiguration?.rewardKind === "voucher" ? "selected" : ""}>Gutschein</option>
+            </select>
+          </label>
+          <label class="field" id="loyalty-freeproduct-field"><span>Produkt</span><input id="loyalty-free-product-name" value="${escapeHTML(app.data.loyaltyConfiguration?.freeProductName || "Gratis Dessert")}" placeholder="z. B. Gratis Dessert"></label>
+          <label class="field" id="loyalty-discount-field"><span>Rabatt in %</span><input id="loyalty-discount-percentage" type="number" min="1" max="100" step="1" value="${Number(app.data.loyaltyConfiguration?.discountPercentage || 10)}"></label>
+          <label class="field" id="loyalty-voucher-field"><span>Gutscheinwert</span><input id="loyalty-voucher-value" type="number" min="0" step="0.5" value="${Number(app.data.loyaltyConfiguration?.voucherValue || 10)}"></label>
+          <label class="check"><input id="loyalty-review-bonus" type="checkbox" ${app.data.loyaltyConfiguration?.awardsStampForReview ? "checked" : ""}><span>Bonus-Stempel für Bewertungen</span></label>
+          <p class="field-hint">Zählt jede Reservierung, die nicht storniert wurde oder als „Nicht erschienen" markiert ist. Sichtbar in App, Dashboard und auf der Reservierungsseite.</p>
+          <button class="primary" type="submit">Kundenbindungsprogramm speichern</button>
+        </form>
+        <script>
+          (() => {
+            const kindSelect = document.getElementById("loyalty-reward-kind");
+            const groups = {
+              freeProduct: document.getElementById("loyalty-freeproduct-field"),
+              discount: document.getElementById("loyalty-discount-field"),
+              voucher: document.getElementById("loyalty-voucher-field")
+            };
+            function sync() {
+              Object.entries(groups).forEach(([key, el]) => {
+                el?.classList.toggle("hidden", kindSelect?.value !== key);
+              });
+            }
+            kindSelect?.addEventListener("change", sync);
+            sync();
+          })();
+        </script>
+      </div>
+    </section>`;
+}
+
+function settingsKasseTab() {
   if (!app.fiscalStatus) loadFiscalStatus();
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Kassenstatus (Server)</h2></header>
+      <div class="section-body compact-list">
+        ${renderFiscalStatusSection()}
+      </div>
+    </section>`;
+}
+
+function settingsGeraeteTab() {
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Drucker</h2><button class="secondary" type="button" data-action="add-printer">Drucker hinzufügen</button></header>
+      <div class="section-body">
+        ${app.data.printers.length ? `<table class="data-table">
+          <thead><tr><th>Name</th><th>Verbindung</th><th>Station</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${app.data.printers.map((printer) => {
+              const station = app.data.stations.find((item) => item.id === printer.assignedStationID);
+              return `<tr class="${printer.isActive === false ? "is-disabled" : ""}">
+                <td><strong>${escapeHTML(printer.name)}</strong></td>
+                <td>${escapeHTML(printer.transport === "Bluetooth" ? "Bluetooth" : printer.transport === "Testdrucker" ? "Testdrucker" : "WLAN")}${printer.endpoint ? ` · ${escapeHTML(printer.endpoint)}` : ""}</td>
+                <td>${escapeHTML(station?.name || "–")}</td>
+                <td>${printer.isActive === false ? `<span class="badge red">Deaktiviert</span>` : `<span class="badge green">Aktiv</span>`}</td>
+                <td><div class="row-actions"><button class="row-button" type="button" data-printer-id="${printer.id}">Bearbeiten</button></div></td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>` : emptyHTML("Noch keine Drucker", "Lege deinen ersten Bondrucker an - er lässt sich danach einer Station zuordnen.")}
+        <p class="field-hint">Bluetooth-Drucker müssen einmal in der Haviko-App gekoppelt werden; von hier aus lassen sich nur WLAN-Drucker (per IP) neu anlegen.</p>
+      </div>
+    </section>
+    <section class="section">
+      <header class="section-header"><h2>Geräte & Stationen</h2></header>
+      <div class="section-body">
+        <p>Gerätezugänge (Kassen, digitale Stationsdisplays) werden im Team-Bereich verwaltet und ausschließlich in der Haviko-App angemeldet.</p>
+        <p class="field-hint">Kassen öffnen Tische und Theke. Digitale Stationsdisplays zeigen nur die Aufträge ihrer zugewiesenen Station. Stationen selbst werden unter „Stationen" verwaltet.</p>
+      </div>
+    </section>`;
+}
+
+function renderSettings() {
+  const tab = SETTINGS_TABS.some((item) => item.id === app.settingsTab) ? app.settingsTab : "restaurant";
+  const panels = {
+    restaurant: settingsRestaurantTab,
+    betrieb: settingsBetriebTab,
+    reservierung: settingsReservierungTab,
+    kundenbindung: settingsKundenbindungTab,
+    kasse: settingsKasseTab,
+    geraete: settingsGeraeteTab
+  };
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Einstellungen</h2><p>Restaurant, Online-Buchung und Kassenvorbereitung.</p></div></div>
+    <div class="filter-row" role="tablist" aria-label="Einstellungen">
+      ${SETTINGS_TABS.map((item) => `<button class="filter-button ${item.id === tab ? "selected" : ""}" type="button" data-settings-tab="${item.id}">${escapeHTML(item.title)}</button>`).join("")}
+    </div>
     <div class="settings-layout">
-      <section class="section">
-        <header class="section-header"><h2>Restaurant</h2></header>
-        <div class="section-body">
-          <label class="field"><span>Name</span><input value="${escapeHTML(app.data.restaurantName)}" readonly aria-readonly="true"></label>
-          <label class="field"><span>Restaurantkennung</span><input value="${escapeHTML(app.workspace.restaurantCode)}" readonly aria-readonly="true"></label>
-        </div>
-      </section>
-      <section class="section">
-        <header class="section-header"><h2>Betriebstag</h2>${cashDay ? `<span class="badge ${sameDay(cashDay.businessDate) ? "green" : "warning"}">${sameDay(cashDay.businessDate) ? "Heute geöffnet" : "Vortag offen"}</span>` : `<span class="badge">Geschlossen</span>`}</header>
-        <div class="section-body">
-          ${cashDay ? `
-            <div class="compact-list">
-              ${settingStatus("Geschäftsdatum", formatDate(cashDay.businessDate, { dateStyle: "long" }), sameDay(cashDay.businessDate))}
-              ${settingStatus("Geöffnet von", cashDay.openedBy || app.workspace.displayName, true)}
-              ${settingStatus("Startbestand", formatCurrency(cashDay.openingFloat), true)}
-            </div>
-            <form id="cash-day-close-form">
-              <label class="field"><span>Gezählter Kassenbestand</span><input id="cash-day-actual" type="number" min="0" step="0.01" required></label>
-              <label class="field"><span>Abschlussnotiz</span><textarea id="cash-day-note"></textarea></label>
-              <button class="danger" type="submit">Tag abschließen</button>
-            </form>` : `
-            <form id="cash-day-open-form">
-              <label class="field"><span>Startbestand</span><input id="cash-day-float" type="number" min="0" step="0.01" value="0" required></label>
-              <button class="primary" type="submit">Tag öffnen</button>
-            </form>`}
-        </div>
-      </section>
-      <section class="section">
-        <header class="section-header"><h2>Online-Reservierung</h2></header>
-        <div class="section-body">
-          <form id="business-settings-form">
-            <label class="field"><span>Straße</span><input id="business-street" value="${escapeHTML(booking?.restaurant?.street || "")}" autocomplete="address-line1" required></label>
-            <div class="field-grid">
-              <label class="field"><span>Hausnummer</span><input id="business-house-number" value="${escapeHTML(booking?.restaurant?.houseNumber || "")}"></label>
-              <label class="field"><span>Postleitzahl</span><input id="business-postal-code" value="${escapeHTML(booking?.restaurant?.postalCode || "")}" autocomplete="postal-code" required></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span>Ort</span><input id="business-city" value="${escapeHTML(booking?.restaurant?.city || "")}" autocomplete="address-level2" required></label>
-              <label class="field"><span>Bundesland</span>
-                <select id="business-state">
-                  <option value="" ${!booking?.restaurant?.state ? "selected" : ""}>Keine Angabe</option>
-                  ${GERMAN_FEDERAL_STATES.map(state => `<option value="${state}" ${booking?.restaurant?.state === state ? "selected" : ""}>${state}</option>`).join("")}
-                </select>
-              </label>
-            </div>
-            <label class="field"><span>Land</span>
-              <select id="business-country">
-                <option value="Deutschland" selected>Deutschland</option>
-              </select>
-            </label>
-            <p class="field-hint">Eine vollständige, sauber getrennte Adresse lässt sich zuverlässiger einem Standort zuordnen (u. a. fürs Wetter im Start-Tab).</p>
-            <div class="field-grid">
-              <label class="field"><span>Telefon</span><input id="business-phone" value="${escapeHTML(booking?.restaurant?.phone || "")}" autocomplete="tel"></label>
-              <label class="field"><span>E-Mail</span><input id="business-email" type="email" value="${escapeHTML(booking?.restaurant?.email || "")}" autocomplete="email"></label>
-            </div>
-            <label class="field"><span>Öffnungszeiten-Hinweis</span><textarea id="business-opening-text" placeholder="z. B. Dienstag bis Sonntag, 17:00–23:00 Uhr">${escapeHTML(booking?.restaurant?.openingHoursText || "")}</textarea></label>
-            <label class="check"><input id="business-booking-enabled" type="checkbox" ${booking?.restaurant?.settings?.bookingEnabled ? "checked" : ""}><span>Online-Reservierung veröffentlichen</span></label>
-            <label class="check"><input id="business-auto-confirm" type="checkbox" ${booking?.restaurant?.settings?.automaticConfirmation !== false ? "checked" : ""}><span>Reservierungen automatisch bestätigen</span></label>
-            <label class="check"><input id="business-location-required" type="checkbox" ${booking?.restaurant?.settings?.clockInRequiresLocation ? "checked" : ""}><span>Einstempeln nur am Restaurant erlauben</span></label>
-            <label class="check"><input id="business-outdoor-seating" type="checkbox" ${booking?.restaurant?.settings?.hasOutdoorSeating ? "checked" : ""}><span>Terrasse / Außenbereich vorhanden</span></label>
-            <label class="check"><input id="business-benchmark-optin" type="checkbox" ${booking?.restaurant?.settings?.benchmarkOptIn ? "checked" : ""}><span>Am anonymen Branchenvergleich teilnehmen</span></label>
-            <label class="field"><span>Erlaubter Radius</span><input id="business-location-radius" type="number" min="50" max="1000" step="25" value="${Number(booking?.restaurant?.settings?.clockInRadiusMeters || 150)}"></label>
-            <button class="secondary" type="button" data-action="use-current-location">Aktuellen Standort übernehmen</button>
-            <p class="field-hint">${booking?.restaurant?.settings?.clockInLatitude != null ? "Standort ist hinterlegt." : "Für die Standortprüfung zuerst den Standort übernehmen oder die Adresse in der App bestätigen."}</p>
-            <button class="primary" type="submit">Betriebsdaten speichern</button>
-          </form>
-          ${booking?.publicID ? `<a class="secondary" href="../?r=${encodeURIComponent(booking.publicID)}" target="_blank" rel="noopener">Reservierungsseite öffnen</a>` : ""}
-        </div>
-      </section>
-      <section class="section">
-        <header class="section-header"><h2>Kundenbindungsprogramm</h2></header>
-        <div class="section-body">
-          <form id="loyalty-settings-form">
-            <label class="check"><input id="loyalty-enabled" type="checkbox" ${app.data.loyaltyConfiguration?.enabled ? "checked" : ""}><span>Stempelkarte aktivieren</span></label>
-            <label class="field"><span>Besuche bis zur Belohnung</span><input id="loyalty-visits-required" type="number" min="1" max="100" step="1" value="${Number(app.data.loyaltyConfiguration?.visitsRequired || 5)}" required></label>
-            <label class="field"><span>Art der Belohnung</span>
-              <select id="loyalty-reward-kind">
-                <option value="freeProduct" ${(app.data.loyaltyConfiguration?.rewardKind || "freeProduct") === "freeProduct" ? "selected" : ""}>Gratis Produkt</option>
-                <option value="discount" ${app.data.loyaltyConfiguration?.rewardKind === "discount" ? "selected" : ""}>Rabatt</option>
-                <option value="voucher" ${app.data.loyaltyConfiguration?.rewardKind === "voucher" ? "selected" : ""}>Gutschein</option>
-              </select>
-            </label>
-            <label class="field" id="loyalty-freeproduct-field"><span>Produkt</span><input id="loyalty-free-product-name" value="${escapeHTML(app.data.loyaltyConfiguration?.freeProductName || "Gratis Dessert")}" placeholder="z. B. Gratis Dessert"></label>
-            <label class="field" id="loyalty-discount-field"><span>Rabatt in %</span><input id="loyalty-discount-percentage" type="number" min="1" max="100" step="1" value="${Number(app.data.loyaltyConfiguration?.discountPercentage || 10)}"></label>
-            <label class="field" id="loyalty-voucher-field"><span>Gutscheinwert</span><input id="loyalty-voucher-value" type="number" min="0" step="0.5" value="${Number(app.data.loyaltyConfiguration?.voucherValue || 10)}"></label>
-            <label class="check"><input id="loyalty-review-bonus" type="checkbox" ${app.data.loyaltyConfiguration?.awardsStampForReview ? "checked" : ""}><span>Bonus-Stempel für Bewertungen</span></label>
-            <p class="field-hint">Zählt jede Reservierung, die nicht storniert wurde oder als „Nicht erschienen" markiert ist. Sichtbar in App, Dashboard und auf der Reservierungsseite.</p>
-            <button class="primary" type="submit">Kundenbindungsprogramm speichern</button>
-          </form>
-          <script>
-            (() => {
-              const kindSelect = document.getElementById("loyalty-reward-kind");
-              const groups = {
-                freeProduct: document.getElementById("loyalty-freeproduct-field"),
-                discount: document.getElementById("loyalty-discount-field"),
-                voucher: document.getElementById("loyalty-voucher-field")
-              };
-              function sync() {
-                Object.entries(groups).forEach(([key, el]) => {
-                  el?.classList.toggle("hidden", kindSelect?.value !== key);
-                });
-              }
-              kindSelect?.addEventListener("change", sync);
-              sync();
-            })();
-          </script>
-        </div>
-      </section>
-      <section class="section">
-        <header class="section-header"><h2>Kassenstatus (Server)</h2></header>
-        <div class="section-body compact-list">
-          ${renderFiscalStatusSection()}
-        </div>
-      </section>
-      <section class="section">
-        <header class="section-header"><h2>Geräte, Stationen & Drucker</h2></header>
-        <div class="section-body">
-          <p>Gerätezugänge werden im Team-Bereich verwaltet und ausschließlich in der Haviko-App angemeldet.</p>
-          <p class="field-hint">Kassen öffnen Tische und Theke. Digitale Stationsdisplays zeigen nur die Aufträge ihrer zugewiesenen Station. Klassische Bondrucker besitzen keinen Mitarbeiterzugang.</p>
-        </div>
-      </section>
+      ${panels[tab]()}
     </div>
   `;
 }
@@ -3781,6 +3848,59 @@ async function saveStation() {
   )) closeModal();
 }
 
+function openPrinterEditor(printerID = null) {
+  const printer = app.data.printers.find((item) => item.id === printerID);
+  const printStations = app.data.stations.filter((station) => station.defaultMode === "print");
+  openModal({
+    eyebrow: printer ? "Bearbeiten" : "Neu",
+    title: "Drucker",
+    body: `
+      <form id="printer-form" data-id="${printer?.id || ""}">
+        <label class="field"><span>Name</span><input id="printer-name" value="${escapeHTML(printer?.name || "")}" required></label>
+        <label class="field"><span>IP-Adresse (WLAN)</span><input id="printer-endpoint" value="${escapeHTML(printer?.endpoint || "")}" placeholder="z. B. 192.168.1.50" ${printer && printer.transport !== "Netzwerk" ? "" : "required"}></label>
+        <label class="field"><span>Bondruckprofil</span>
+          <select id="printer-station">
+            <option value="">Noch keiner Station zugeordnet</option>
+            ${printStations.map((station) => `<option value="${station.id}" ${printer?.assignedStationID === station.id ? "selected" : ""}>${escapeHTML(station.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="check"><input id="printer-active" type="checkbox" ${printer?.isActive !== false ? "checked" : ""}><span>Drucker ist aktiv</span></label>
+        ${printer && printer.transport !== "Netzwerk" ? `<p class="field-hint">Dieser Drucker wurde über ${escapeHTML(printer.transport === "Bluetooth" ? "Bluetooth" : "den internen Testdienst")} in der App eingerichtet - die Verbindung selbst lässt sich nur dort ändern.</p>` : ""}
+      </form>`,
+    footer: `
+      ${printer ? `<button class="danger" type="button" data-modal-action="delete-printer" data-id="${printer.id}">Löschen</button>` : ""}
+      <button class="secondary" type="button" data-modal-action="close">Abbrechen</button>
+      <button class="primary" type="button" data-modal-action="save-printer">Speichern</button>`
+  });
+}
+
+async function savePrinter() {
+  const form = $("printer-form");
+  if (!form?.reportValidity()) return;
+  const printers = structuredClone(app.data.printers);
+  const existing = printers.find((item) => item.id === form.dataset.id);
+  const printer = {
+    id: existing?.id || uuid(),
+    name: $("printer-name").value.trim(),
+    transport: existing?.transport || "Netzwerk",
+    endpoint: $("printer-endpoint").value.trim(),
+    assignedStationID: $("printer-station").value || null,
+    connectionStatus: existing?.connectionStatus || "Unbekannt",
+    paperStatus: existing?.paperStatus || "Papier vorhanden",
+    isActive: $("printer-active").checked,
+    printsReceiptsByDefault: existing?.printsReceiptsByDefault || false
+  };
+  if (existing) Object.assign(existing, printer);
+  else printers.push(printer);
+  if (await savePatch({ printers }, "Drucker wurde gespeichert.")) closeModal();
+}
+
+async function deletePrinter(printerID) {
+  if (!window.confirm("Diesen Drucker wirklich löschen?")) return;
+  const printers = app.data.printers.filter((item) => item.id !== printerID);
+  if (await savePatch({ printers }, "Drucker wurde gelöscht.")) closeModal();
+}
+
 async function shiftAction(action) {
   const now = swiftDate();
   if (action === "start") {
@@ -3836,6 +3956,8 @@ function handleViewClick(event) {
   if (productID) return openProductEditor(productID);
   const stationID = event.target.closest("[data-station-id]")?.dataset.stationId;
   if (stationID) return openStationEditor(stationID);
+  const printerID = event.target.closest("[data-printer-id]")?.dataset.printerId;
+  if (printerID) return openPrinterEditor(printerID);
   const memberID = event.target.closest("[data-member-id]")?.dataset.memberId;
   if (memberID) return openMemberEditor(memberID);
   const deviceID = event.target.closest("[data-device-id]")?.dataset.deviceId;
@@ -3866,6 +3988,12 @@ function handleViewClick(event) {
     renderTeam();
     return;
   }
+  const settingsTab = event.target.closest("[data-settings-tab]")?.dataset.settingsTab;
+  if (settingsTab) {
+    app.settingsTab = settingsTab;
+    renderSettings();
+    return;
+  }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
   if (action === "add-table") openTableEditor();
@@ -3875,6 +4003,7 @@ function handleViewClick(event) {
   if (action === "add-member") openMemberEditor();
   if (action === "add-device") openDeviceEditor();
   if (action === "add-station") openStationEditor();
+  if (action === "add-printer") openPrinterEditor();
   if (action === "save-operating-mode") saveKitchenOperatingMode();
   if (action === "plan-shift") openScheduledShiftEditor();
   if (action === "start-shift") shiftAction("start");
@@ -3929,6 +4058,8 @@ function handleModalClick(event) {
   if (action === "save-scheduled-shift") saveScheduledShift();
   if (action === "save-table") saveTable();
   if (action === "save-station") saveStation();
+  if (action === "save-printer") savePrinter();
+  if (action === "delete-printer" && id) deletePrinter(id);
   if (action === "account") openAccountMenu();
   if (action === "edit-name") openEditProfileName();
   if (action === "save-name") saveProfileName();
