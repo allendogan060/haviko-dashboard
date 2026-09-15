@@ -34,6 +34,7 @@ const app = {
   reservationDate: localDateInput(new Date()),
   tableArea: "",
   tableViewMode: "grid",
+  teamViewMode: "grid",
   orderCart: [],
   orderTableID: null,
   reviews: [],
@@ -93,6 +94,7 @@ const routes = [
   { id: "analytics", title: "Statistik", roles: ["restaurant_manager", "management"] },
   { id: "reviews", title: "Bewertungen", roles: ["restaurant_manager", "management"] },
   { id: "reports", title: "Berichte", roles: ["restaurant_manager", "management"] },
+  { id: "inbox", title: "Postfach", roles: ["restaurant_manager", "management"] },
   { id: "stations", title: "Stationen", roles: ["restaurant_manager"] },
   { id: "settings", title: "Einstellungen", roles: ["restaurant_manager"] }
 ];
@@ -109,6 +111,7 @@ const routeSlugs = {
   analytics: "statistik",
   reviews: "bewertungen",
   reports: "berichte",
+  inbox: "postfach",
   stations: "stationen",
   settings: "einstellungen"
 };
@@ -497,7 +500,8 @@ function defaultState(session) {
     },
     fiscalReceipts: [],
     cashDaySessions: [],
-    fiscalAuditEvents: []
+    fiscalAuditEvents: [],
+    inboxNotifications: []
   };
 }
 
@@ -646,6 +650,7 @@ function normalizeState(state = {}) {
     fiscalReceipts: state.fiscalReceipts || [],
     cashDaySessions: state.cashDaySessions || [],
     fiscalAuditEvents: state.fiscalAuditEvents || [],
+    inboxNotifications: state.inboxNotifications || [],
     loyaltyConfiguration: state.loyaltyConfiguration || {
       enabled: false,
       visitsRequired: 5,
@@ -914,6 +919,7 @@ function render() {
     case "analytics": renderAnalytics(); break;
     case "reviews": renderReviews(); break;
     case "reports": renderReports(); break;
+    case "inbox": renderInbox(); break;
     case "stations": renderStations(); break;
     case "settings": renderSettings(); break;
     default: renderOverview();
@@ -1111,6 +1117,23 @@ function itemColor(name) {
     purple: "#7a55b3",
     blue: "#2878c7"
   }[name] || "#2878c7";
+}
+
+// Deterministic color per role name (same role always gets the same color,
+// no matter which member has it) - mirrors the colored role-corner used in
+// the reference admin UI Allen wants Team's card view to match.
+const ROLE_COLOR_PALETTE = ["#c83d4d", "#ef7b45", "#e9ad28", "#3d9b55", "#0a8f70", "#2878c7", "#7a55b3"];
+function roleColor(role) {
+  const text = String(role || "");
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  return ROLE_COLOR_PALETTE[hash % ROLE_COLOR_PALETTE.length];
+}
+
+function memberInitials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return ((parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
 function tableRunningTotal(tableID) {
@@ -1413,34 +1436,22 @@ function renderTeam() {
     seenNames.add(key);
     return true;
   });
+  const viewMode = app.teamViewMode === "list" ? "list" : "grid";
   $("view").innerHTML = `
     <div class="page-tools">
       <div><h2>Team & Geräte</h2><p>Persönliche Zugänge und fest zugewiesene Betriebsgeräte getrennt verwalten.</p></div>
       <div class="tool-actions">
+        <div class="segmented" role="tablist" aria-label="Ansicht" style="min-width:180px;margin-bottom:0;">
+          <button class="${viewMode === "grid" ? "selected" : ""}" type="button" data-team-view-mode="grid">Kacheln</button>
+          <button class="${viewMode === "list" ? "selected" : ""}" type="button" data-team-view-mode="list">Liste</button>
+        </div>
         <button class="secondary" type="button" data-action="add-device">Gerät hinzufügen</button>
         <button class="primary" type="button" data-action="add-member">Mitarbeiter hinzufügen</button>
       </div>
     </div>
     <section class="section table-section">
       <div class="section-heading"><div><p class="eyebrow">Persönliche Zugänge</p><h3>Mitarbeiter</h3></div></div>
-      <table class="data-table">
-        <thead><tr><th>Name und Anmeldung</th><th>Rolle</th><th>Status</th><th>Telefon</th><th></th></tr></thead>
-        <tbody>
-          ${visibleTeam.map((member) => {
-            // Optional-safe wie im iOS-Model: fehlt das Feld (ältere
-            // Daten), gilt das Konto als aktiv.
-            const isActive = member.isActive !== false;
-            return `
-            <tr${isActive ? "" : ' class="is-disabled"'}>
-              <td><strong>${escapeHTML(member.name)}</strong></td>
-              <td>${statusBadge(member.role)}</td>
-              <td>${statusBadge(isActive ? "Aktiv" : "Deaktiviert")}</td>
-              <td>${escapeHTML(member.phone || "–")}</td>
-              <td><div class="row-actions"><button class="row-button" type="button" data-member-id="${member.id}">Bearbeiten</button></div></td>
-            </tr>`;
-          }).join("")}
-        </tbody>
-      </table>
+      ${viewMode === "list" ? renderMemberList(visibleTeam) : renderMemberGrid(visibleTeam)}
     </section>
     <section class="section table-section">
       <div class="section-heading"><div><p class="eyebrow">Festes Gerät</p><h3>Geräte</h3><p>Der Gerätename ist zugleich der eindeutige Anmeldename.</p></div></div>
@@ -1462,6 +1473,47 @@ function renderTeam() {
       ` : `<div class="empty-inline"><strong>Noch keine Gerätezugänge</strong><span>Lege eine Kasse oder ein digitales Stationsdisplay an.</span></div>`}
     </section>
   `;
+}
+
+function renderMemberGrid(members) {
+  if (!members.length) return emptyHTML("Noch keine Mitarbeiter", "Lege dein erstes Teammitglied über den Button oben an.");
+  return `<div class="member-grid">
+    ${members.map((member) => {
+      const isActive = member.isActive !== false;
+      const color = roleColor(member.role);
+      return `
+        <button class="member-card${isActive ? "" : " is-disabled"}" type="button" data-member-id="${member.id}">
+          <div class="member-card-top" style="background:${color}">
+            <span class="member-card-mail" title="${member.phone ? escapeHTML(member.phone) : "Keine Telefonnummer"}">☏</span>
+            ${!isActive ? `<span class="member-card-flag" title="Deaktiviert">⏸</span>` : ""}
+          </div>
+          <div class="member-avatar" style="border-color:${color}">${memberInitials(member.name)}</div>
+          <strong class="member-card-name">${escapeHTML(member.name)}</strong>
+          <span class="badge" style="background:color-mix(in srgb, ${color} 16%, white);color:${color}">${escapeHTML(member.role)}</span>
+        </button>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderMemberList(members) {
+  return `<table class="data-table">
+    <thead><tr><th>Name und Anmeldung</th><th>Rolle</th><th>Status</th><th>Telefon</th><th></th></tr></thead>
+    <tbody>
+      ${members.map((member) => {
+        // Optional-safe wie im iOS-Model: fehlt das Feld (ältere
+        // Daten), gilt das Konto als aktiv.
+        const isActive = member.isActive !== false;
+        return `
+        <tr${isActive ? "" : ' class="is-disabled"'}>
+          <td><strong>${escapeHTML(member.name)}</strong></td>
+          <td>${statusBadge(member.role)}</td>
+          <td>${statusBadge(isActive ? "Aktiv" : "Deaktiviert")}</td>
+          <td>${escapeHTML(member.phone || "–")}</td>
+          <td><div class="row-actions"><button class="row-button" type="button" data-member-id="${member.id}">Bearbeiten</button></div></td>
+        </tr>`;
+      }).join("")}
+    </tbody>
+  </table>`;
 }
 
 function staffingSuggestions() {
@@ -2084,6 +2136,39 @@ function openReceiptDetail(receiptID) {
     `,
     footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
   });
+}
+
+const INBOX_CATEGORY_COLOR = { Haviko: "#2878c7", Reservierungen: "#0a8f70", Konto: "#7a55b3", Team: "#ef7b45" };
+
+function renderInbox() {
+  const notifications = [...app.data.inboxNotifications].sort(
+    (a, b) => dateFromSwift(b.createdAt) - dateFromSwift(a.createdAt)
+  );
+  $("view").innerHTML = `
+    <div class="page-tools">
+      <div><h2>Postfach</h2><p>Mitteilungen aus App und Betrieb, dieselben wie im Postfach der App.</p></div>
+    </div>
+    ${notifications.length ? `<section class="section">
+      <div class="activity-list">
+        ${notifications.map((notification) => {
+          const color = notification.iconColorHex ? `#${String(notification.iconColorHex).replace("#", "")}` : (INBOX_CATEGORY_COLOR[notification.category] || "#68746f");
+          const recipient = notification.recipientMemberID
+            ? app.data.team.find((member) => member.id === notification.recipientMemberID)?.name || "Ein Teammitglied"
+            : "Für alle";
+          return `
+            <article class="activity-row">
+              <span class="activity-icon" style="background:color-mix(in srgb, ${color} 16%, white);color:${color}">${notification.isProblem ? "!" : "✉"}</span>
+              <div class="activity-copy">
+                <strong>${escapeHTML(notification.title || "Mitteilung")}</strong>
+                <span>${escapeHTML(notification.message || "")}</span>
+                <span>${escapeHTML(notification.category || "Haviko")} · ${escapeHTML(recipient)}</span>
+              </div>
+              <span class="muted">${formatDate(notification.createdAt, { dateStyle: "medium", timeStyle: "short" })}</span>
+            </article>`;
+        }).join("")}
+      </div>
+    </section>` : emptyHTML("Noch keine Mitteilungen", "Hier erscheinen dieselben Mitteilungen wie im Postfach der App.")}
+  `;
 }
 
 function renderStations() {
@@ -3773,6 +3858,12 @@ function handleViewClick(event) {
   if (viewMode) {
     app.tableViewMode = viewMode;
     renderTables();
+    return;
+  }
+  const teamViewMode = event.target.closest("[data-team-view-mode]")?.dataset.teamViewMode;
+  if (teamViewMode) {
+    app.teamViewMode = teamViewMode;
+    renderTeam();
     return;
   }
   const action = event.target.closest("[data-action]")?.dataset.action;
