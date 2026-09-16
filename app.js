@@ -42,6 +42,11 @@ const app = {
   orderTableID: null,
   counterCart: [],
   counterCategory: "Alle",
+  appearanceMode: localStorage.getItem("haviko-appearance-mode") || "System",
+  chatKind: "direct",
+  chatConversations: [],
+  chatMessages: [],
+  chatConversationID: null,
   reviews: [],
   loading: false,
   isLoggingOut: false,
@@ -100,6 +105,7 @@ const routes = [
   { id: "products", title: "Produkte", roles: ["restaurant_manager"] },
   { id: "team", title: "Team", roles: ["restaurant_manager"] },
   { id: "shifts", title: "Schicht", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
+  { id: "chat", title: "Chat", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
   { id: "analytics", title: "Statistik", roles: ["restaurant_manager", "management"] },
   { id: "reviews", title: "Bewertungen", roles: ["restaurant_manager", "management"] },
   { id: "reports", title: "Berichte", roles: ["restaurant_manager", "management"] },
@@ -120,6 +126,7 @@ const routeSlugs = {
   products: "produkte",
   team: "team",
   shifts: "schicht",
+  chat: "chat",
   analytics: "statistik",
   reviews: "bewertungen",
   reports: "berichte",
@@ -853,6 +860,15 @@ function normalizeState(state = {}) {
     cashMovements: state.cashMovements || [],
     fiscalAuditEvents: state.fiscalAuditEvents || [],
     inboxNotifications: state.inboxNotifications || [],
+    notificationConfiguration: state.notificationConfiguration || {
+      inAppBannersEnabled: true,
+      reservationNotifications: true,
+      shiftNotifications: true,
+      cashDayNotifications: true,
+      quietHoursEnabled: false,
+      quietHoursStartMinutes: 22 * 60,
+      quietHoursEndMinutes: 7 * 60
+    },
     loyaltyConfiguration: state.loyaltyConfiguration || {
       enabled: false,
       visitsRequired: 5,
@@ -1134,6 +1150,7 @@ function render() {
     case "products": renderProducts(); break;
     case "team": renderTeam(); break;
     case "shifts": renderShifts(); break;
+    case "chat": renderTeamChat(); break;
     case "analytics": renderAnalytics(); break;
     case "reviews": renderReviews(); break;
     case "reports": renderReports(); break;
@@ -2323,6 +2340,106 @@ function renderShifts() {
   `;
 }
 
+async function renderTeamChat() {
+  $("view").innerHTML = emptyHTML("Chat wird geladen", "Konversationen werden aus Haviko geladen.");
+  try {
+    const conversations = await rpc("list_chat_conversations", {
+      p_restaurant_id: app.workspace.restaurantId,
+      p_kind: app.chatKind
+    }) || [];
+    app.chatConversations = conversations;
+    if (!app.chatConversationID && conversations.length) app.chatConversationID = conversations[0].id;
+    if (!conversations.some((item) => item.id === app.chatConversationID)) app.chatConversationID = conversations[0]?.id || null;
+    if (app.chatConversationID) {
+      app.chatMessages = await rpc("list_chat_messages", {
+        p_conversation_id: app.chatConversationID,
+        p_restaurant_id: app.workspace.restaurantId,
+        p_before: null,
+        p_limit: 50
+      }) || [];
+      await rpc("mark_chat_conversation_delivered", {
+        p_conversation_id: app.chatConversationID,
+        p_restaurant_id: app.workspace.restaurantId
+      }).catch(() => {});
+      await rpc("mark_chat_conversation_read", {
+        p_conversation_id: app.chatConversationID,
+        p_restaurant_id: app.workspace.restaurantId
+      }).catch(() => {});
+    } else {
+      app.chatMessages = [];
+    }
+  } catch (error) {
+    $("view").innerHTML = emptyHTML("Chat nicht erreichbar", friendlyError(error));
+    return;
+  }
+  const currentUsername = app.workspace?.username || currentMember()?.username || "";
+  const titleFor = (conversation) => {
+    const usernames = conversation.member_usernames || conversation.memberUsernames || [];
+    const names = conversation.member_display_names || conversation.memberDisplayNames || [];
+    const otherIndex = usernames.findIndex((username) => String(username).toLowerCase() !== String(currentUsername).toLowerCase());
+    return conversation.name || names[otherIndex] || names[0] || "Chat";
+  };
+  const selected = app.chatConversations.find((item) => item.id === app.chatConversationID);
+  $("view").innerHTML = `
+    <div class="page-tools">
+      <div><h2>Chat</h2><p>Direkt- und Gruppenchats über dieselben Haviko-RPCs wie in der App.</p></div>
+      <div class="tool-actions">
+        <button class="secondary ${app.chatKind === "direct" ? "selected" : ""}" type="button" data-chat-kind="direct">Direkt</button>
+        <button class="secondary ${app.chatKind === "group" ? "selected" : ""}" type="button" data-chat-kind="group">Gruppen</button>
+      </div>
+    </div>
+    <div class="chat-layout">
+      <section class="section">
+        <header class="section-header"><h2>Konversationen</h2><span class="badge">${app.chatConversations.length}</span></header>
+        <div class="section-body compact-list">
+          ${app.chatConversations.length ? app.chatConversations.map((conversation) => `
+            <button class="compact-row no-icon chat-row ${conversation.id === app.chatConversationID ? "selected" : ""}" type="button" data-chat-conversation-id="${escapeHTML(conversation.id)}">
+              <div class="activity-copy"><strong>${escapeHTML(titleFor(conversation))}</strong><span>${escapeHTML(conversation.last_message_body || conversation.lastMessageBody || "Noch keine Nachrichten")}</span></div>
+              ${Number(conversation.unread_count || conversation.unreadCount || 0) ? `<span class="badge green">${Number(conversation.unread_count || conversation.unreadCount)}</span>` : `<span class="badge">${formatDate(conversation.last_message_at || conversation.lastMessageAt, { dateStyle: "short", timeStyle: "short" })}</span>`}
+            </button>`).join("") : emptyHTML("Noch keine Chats", "Starte neue Chats in der App; vorhandene Konversationen erscheinen hier.")}
+        </div>
+      </section>
+      <section class="section">
+        <header class="section-header"><h2>${selected ? escapeHTML(titleFor(selected)) : "Nachrichten"}</h2></header>
+        <div class="section-body">
+          ${selected ? `
+            <div class="message-list">
+              ${app.chatMessages.length ? app.chatMessages.map((message) => {
+                const sender = message.sender_username || message.senderUsername || "";
+                const mine = String(sender).toLowerCase() === String(currentUsername).toLowerCase();
+                return `<article class="message-bubble ${mine ? "mine" : ""}">
+                  <strong>${escapeHTML(message.sender_display_name || message.senderDisplayName || "Team")}</strong>
+                  <p>${escapeHTML(message.body || "")}</p>
+                  <span>${formatDate(message.created_at || message.createdAt, { dateStyle: "short", timeStyle: "short" })}</span>
+                </article>`;
+              }).join("") : emptyHTML("Noch keine Nachrichten", "Schreibe die erste Nachricht.")}
+            </div>
+            <form id="chat-message-form" class="chat-composer">
+              <input id="chat-message-body" maxlength="2000" placeholder="Nachricht schreiben ..." required>
+              <button class="primary" type="submit">Senden</button>
+            </form>` : emptyHTML("Kein Chat ausgewählt", "Wähle links eine Konversation aus.")}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+async function sendChatMessage(event) {
+  event.preventDefault();
+  const body = $("chat-message-body")?.value.trim();
+  if (!app.chatConversationID || !body) return;
+  try {
+    await rpc("send_chat_message", {
+      p_conversation_id: app.chatConversationID,
+      p_restaurant_id: app.workspace.restaurantId,
+      p_body: body
+    });
+    await renderTeamChat();
+  } catch (error) {
+    toast("Nachricht nicht gesendet", friendlyError(error), "error");
+  }
+}
+
 // Small colored dot per role (same roleColor() used by the Team card view)
 // next to the name, so Dienstplan/Schichtberichte read at a glance who does
 // what - matches the colored role-corner idea from the reference UI.
@@ -2958,7 +3075,13 @@ const SETTINGS_TABS = [
   { id: "reservierung", title: "Online-Reservierung" },
   { id: "kundenbindung", title: "Kundenbindung" },
   { id: "kasse", title: "Kasse" },
-  { id: "geraete", title: "Geräte & Drucker" }
+  { id: "geraete", title: "Geräte & Drucker" },
+  { id: "notifications", title: "Benachrichtigungen" },
+  { id: "appearance", title: "Darstellung" },
+  { id: "legal", title: "Rechtliches" },
+  { id: "support", title: "Hilfe-Center" },
+  { id: "about", title: "Über Haviko" },
+  { id: "systemStatus", title: "Systemstatus" }
 ];
 
 const HAVIKO_PLUS_MONTHLY_PRICE = 0;
@@ -3270,6 +3393,132 @@ function settingsGeraeteTab() {
     </section>`;
 }
 
+function notificationConfiguration() {
+  return app.data.notificationConfiguration || {
+    inAppBannersEnabled: true,
+    reservationNotifications: true,
+    shiftNotifications: true,
+    cashDayNotifications: true,
+    quietHoursEnabled: false,
+    quietHoursStartMinutes: 22 * 60,
+    quietHoursEndMinutes: 7 * 60
+  };
+}
+
+function settingsNotificationsTab() {
+  const config = notificationConfiguration();
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Benachrichtigungen</h2></header>
+      <div class="section-body">
+        <form id="notification-settings-form">
+          <label class="check-row"><input id="notify-banners" type="checkbox" ${config.inAppBannersEnabled !== false ? "checked" : ""}><span>In-App Hinweise anzeigen</span></label>
+          <label class="check-row"><input id="notify-reservations" type="checkbox" ${config.reservationNotifications !== false ? "checked" : ""}><span>Reservierungen</span></label>
+          <label class="check-row"><input id="notify-shifts" type="checkbox" ${config.shiftNotifications !== false ? "checked" : ""}><span>Schichten & Dienstplan</span></label>
+          <label class="check-row"><input id="notify-cashday" type="checkbox" ${config.cashDayNotifications !== false ? "checked" : ""}><span>Kasse & Tagesabschluss</span></label>
+          <label class="check-row"><input id="notify-quiet" type="checkbox" ${config.quietHoursEnabled ? "checked" : ""}><span>Ruhezeiten verwenden</span></label>
+          <div class="field-grid">
+            <label class="field"><span>Ruhezeit Beginn</span><input id="notify-quiet-start" type="time" value="${timeFromMinutes(config.quietHoursStartMinutes ?? 22 * 60)}"></label>
+            <label class="field"><span>Ruhezeit Ende</span><input id="notify-quiet-end" type="time" value="${timeFromMinutes(config.quietHoursEndMinutes ?? 7 * 60)}"></label>
+          </div>
+          <p class="field-hint">Push-Berechtigungen selbst werden weiterhin am Gerät erteilt. Diese Einstellungen steuern den gemeinsamen Haviko-Status für Web und App.</p>
+          <button class="primary" type="submit">Benachrichtigungen speichern</button>
+        </form>
+      </div>
+    </section>`;
+}
+
+function settingsAppearanceTab() {
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Darstellung</h2></header>
+      <div class="section-body">
+        <form id="appearance-settings-form">
+          <div class="filter-row" role="radiogroup" aria-label="Darstellung">
+            ${["System", "Hell", "Dunkel"].map((mode) => `
+              <label class="filter-button ${app.appearanceMode === mode ? "selected" : ""}">
+                <input class="visually-hidden" type="radio" name="appearance-mode" value="${mode}" ${app.appearanceMode === mode ? "checked" : ""}>
+                ${mode}
+              </label>`).join("")}
+          </div>
+          <p class="field-hint">Der Web-Modus wird lokal im Browser gespeichert. Die App nutzt weiterhin die iOS-Systemeinstellung bzw. ihre lokale App-Einstellung.</p>
+          <button class="primary" type="submit">Darstellung speichern</button>
+        </form>
+      </div>
+    </section>`;
+}
+
+function settingsLegalTab() {
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Rechtliches</h2></header>
+      <div class="section-body compact-list">
+        <a class="compact-row no-icon" href="https://reservierung.haviko.de/datenschutz/" target="_blank" rel="noopener">
+          <div class="activity-copy"><strong>Datenschutzerklärung</strong><span>Aktuelle öffentliche Fassung öffnen</span></div><span class="badge">Web</span>
+        </a>
+        <a class="compact-row no-icon" href="https://reservierung.haviko.de/nutzungsbedingungen/" target="_blank" rel="noopener">
+          <div class="activity-copy"><strong>Nutzungsbedingungen</strong><span>Aktuelle öffentliche Fassung öffnen</span></div><span class="badge">Web</span>
+        </a>
+        <a class="compact-row no-icon" href="https://reservierung.haviko.de/impressum/" target="_blank" rel="noopener">
+          <div class="activity-copy"><strong>Impressum</strong><span>Betreiberangaben öffnen</span></div><span class="badge">Web</span>
+        </a>
+      </div>
+    </section>`;
+}
+
+function settingsSupportTab() {
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Hilfe-Center</h2><span class="badge ${hasHavikoPlusAccess() ? "green" : ""}">${hasHavikoPlusAccess() ? "Priority" : "Standard"}</span></header>
+      <div class="section-body compact-list">
+        <a class="compact-row no-icon" href="https://support.haviko.de/" target="_blank" rel="noopener">
+          <div class="activity-copy"><strong>Support öffnen</strong><span>Fragen, Konto, Freischaltung und Hilfe</span></div><span class="badge">Web</span>
+        </a>
+        <a class="compact-row no-icon" href="mailto:support@haviko.de?subject=Haviko%20Support%20${encodeURIComponent(app.workspace?.restaurantCode || "")}">
+          <div class="activity-copy"><strong>E-Mail an Support</strong><span>${escapeHTML(app.workspace?.restaurantCode || "Restaurantkennung")} mitsenden</span></div><span class="badge">Mail</span>
+        </a>
+        <div class="compact-row no-icon"><div class="activity-copy"><strong>Restaurantkennung</strong><span>${escapeHTML(app.workspace?.restaurantCode || "–")}</span></div><button class="row-button" type="button" data-action="copy-code">Kopieren</button></div>
+      </div>
+    </section>`;
+}
+
+function settingsAboutTab() {
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Über Haviko</h2></header>
+      <div class="section-body compact-list">
+        ${settingStatus("Dashboard", "dashboard.haviko.de", true)}
+        ${settingStatus("Restaurant", app.data.restaurantName || app.workspace?.restaurantName || "–", true)}
+        ${settingStatus("Rolle", roleTitles[app.workspace?.role] || app.workspace?.role || "–", true)}
+        ${settingStatus("Haviko+", havikoPlusStatusTitle(), hasHavikoPlusAccess())}
+      </div>
+    </section>`;
+}
+
+function systemComponentRows(status) {
+  const components = Array.isArray(status?.components) ? status.components : [];
+  if (!components.length) return emptyHTML("Keine Komponenten", "Der Systemstatus liefert gerade keine Detailkomponenten.");
+  return `<div class="compact-list">${components.map((component) => {
+    const state = component.status || component.state || "unknown";
+    const badgeClass = state === "operational" || state === "ready" ? "green" : state === "degraded" ? "orange" : state === "maintenance" ? "blue" : "red";
+    return `<div class="compact-row no-icon"><div class="activity-copy"><strong>${escapeHTML(component.name || component.id || "Komponente")}</strong><span>${escapeHTML(component.message || component.description || "")}</span></div><span class="badge ${badgeClass}">${escapeHTML(state)}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function settingsSystemStatusTab() {
+  const status = lastSystemStatus;
+  const overall = status?.overall || status?.status || "unknown";
+  const badgeClass = overall === "operational" || overall === "ready" ? "green" : overall === "maintenance" ? "blue" : overall === "degraded" ? "orange" : "red";
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Systemstatus</h2><span class="badge ${badgeClass}">${escapeHTML(overall)}</span></header>
+      <div class="section-body">
+        <button class="secondary" type="button" data-action="refresh-system-status">Aktualisieren</button>
+        ${status ? systemComponentRows(status) : emptyHTML("Status wird geladen", "Aktualisiere den Systemstatus.")}
+      </div>
+    </section>`;
+}
+
 function renderSettings() {
   const tab = SETTINGS_TABS.some((item) => item.id === app.settingsTab) ? app.settingsTab : "restaurant";
   const panels = {
@@ -3279,7 +3528,13 @@ function renderSettings() {
     reservierung: settingsReservierungTab,
     kundenbindung: settingsKundenbindungTab,
     kasse: settingsKasseTab,
-    geraete: settingsGeraeteTab
+    geraete: settingsGeraeteTab,
+    notifications: settingsNotificationsTab,
+    appearance: settingsAppearanceTab,
+    legal: settingsLegalTab,
+    support: settingsSupportTab,
+    about: settingsAboutTab,
+    systemStatus: settingsSystemStatusTab
   };
   $("view").innerHTML = `
     <div class="page-tools"><div><h2>Einstellungen</h2><p>Restaurant, Online-Buchung und Kassenvorbereitung.</p></div></div>
@@ -3405,6 +3660,29 @@ async function saveLoyaltySettings(event) {
     },
     "Kundenbindungsprogramm wurde gespeichert."
   );
+}
+
+async function saveNotificationSettings(event) {
+  event.preventDefault();
+  const configuration = {
+    inAppBannersEnabled: $("notify-banners")?.checked !== false,
+    reservationNotifications: $("notify-reservations")?.checked !== false,
+    shiftNotifications: $("notify-shifts")?.checked !== false,
+    cashDayNotifications: $("notify-cashday")?.checked !== false,
+    quietHoursEnabled: $("notify-quiet")?.checked || false,
+    quietHoursStartMinutes: minutesFromTime($("notify-quiet-start")?.value, 22 * 60),
+    quietHoursEndMinutes: minutesFromTime($("notify-quiet-end")?.value, 7 * 60)
+  };
+  await savePatch({ notificationConfiguration: configuration }, "Benachrichtigungen wurden gespeichert.");
+}
+
+function saveAppearanceSettings(event) {
+  event.preventDefault();
+  const mode = document.querySelector("input[name='appearance-mode']:checked")?.value || "System";
+  app.appearanceMode = mode;
+  localStorage.setItem("haviko-appearance-mode", mode);
+  toast("Gespeichert", "Darstellung wurde für diesen Browser gespeichert.", "success");
+  renderSettings();
 }
 
 function renderFiscalStatusSection() {
@@ -4980,6 +5258,19 @@ function handleViewClick(event) {
   if (voucherID) return openVoucherDetail(voucherID);
   const blockedPeriodID = event.target.closest("[data-blocked-period-remove]")?.dataset.blockedPeriodRemove;
   if (blockedPeriodID) return removeBlockedPeriod(blockedPeriodID);
+  const chatKind = event.target.closest("[data-chat-kind]")?.dataset.chatKind;
+  if (chatKind) {
+    app.chatKind = chatKind;
+    app.chatConversationID = null;
+    renderTeamChat();
+    return;
+  }
+  const chatConversationID = event.target.closest("[data-chat-conversation-id]")?.dataset.chatConversationId;
+  if (chatConversationID) {
+    app.chatConversationID = chatConversationID;
+    renderTeamChat();
+    return;
+  }
   const billingMonth = event.target.closest("[data-action='download-billing-invoice']")?.dataset.month;
   if (billingMonth) return downloadBillingInvoice(billingMonth);
   const counterCategory = event.target.closest("[data-counter-category]")?.dataset.counterCategory;
@@ -5039,6 +5330,9 @@ function handleViewClick(event) {
   if (action === "voucher-settings") openVoucherSettings();
   if (action === "save-availability") saveAvailability();
   if (action === "add-blocked-period") openBlockedPeriodEditor();
+  if (action === "refresh-system-status") {
+    checkMaintenanceMode().then(() => renderSettings());
+  }
   if (action === "add-member") openMemberEditor();
   if (action === "add-device") openDeviceEditor();
   if (action === "add-station") openStationEditor();
@@ -5297,6 +5591,9 @@ $("view").addEventListener("submit", (event) => {
   if (event.target.id === "cash-day-close-form") closeCashDay(event);
   if (event.target.id === "business-settings-form") saveBusinessSettings(event);
   if (event.target.id === "loyalty-settings-form") saveLoyaltySettings(event);
+  if (event.target.id === "notification-settings-form") saveNotificationSettings(event);
+  if (event.target.id === "appearance-settings-form") saveAppearanceSettings(event);
+  if (event.target.id === "chat-message-form") sendChatMessage(event);
 });
 window.addEventListener("online", updateOnlineStatus);
 window.addEventListener("offline", updateOnlineStatus);
