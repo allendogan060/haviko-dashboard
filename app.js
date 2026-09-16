@@ -5,7 +5,7 @@ const GERMAN_FEDERAL_STATES = [
 ];
 const SUPABASE_URL = "https://dlapwemckfhxklytbqkk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_VeeQLARNn-sULZ4snvp3HA_Hd78H5RN";
-const DEVELOPMENT_MODE = true;
+const DEVELOPMENT_MODE = false;
 const AUTH_STORAGE_KEY = "servora-web-session";
 const LAST_RESTAURANT_KEY = "servora-web-restaurant";
 const WEB_MUTATION_QUEUE_KEY = "haviko-web-mutation-queue";
