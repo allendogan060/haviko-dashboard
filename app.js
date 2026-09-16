@@ -1171,6 +1171,19 @@ function metric(title, value, note) {
   `;
 }
 
+function dashboardMetric(route, title, value, note, tone = "") {
+  const isAllowed = routeAllowed(route);
+  const tag = isAllowed ? "button" : "article";
+  const attrs = isAllowed ? `type="button" data-route="${escapeHTML(route)}"` : "";
+  return `
+    <${tag} class="metric dashboard-metric ${tone}" ${attrs}>
+      <div class="metric-head"><span>${escapeHTML(title)}</span>${isAllowed ? `<small>Öffnen</small>` : ""}</div>
+      <strong>${escapeHTML(value)}</strong>
+      <small>${escapeHTML(note)}</small>
+    </${tag}>
+  `;
+}
+
 function easterSunday(year) {
   const a = year % 19;
   const b = Math.floor(year / 100);
@@ -1276,9 +1289,16 @@ function renderOverview() {
   );
   const activeTables = app.data.tables.filter((table) => table.status === "besetzt");
   const openTickets = app.data.tickets.filter((ticket) => ["Neu", "In Zubereitung", "Fertig"].includes(ticket.status));
+  const readyTickets = openTickets.filter((ticket) => ticket.status === "Fertig");
+  const seatedReservations = todayReservations.filter((reservation) => reservation.status === "Platziert");
+  const expectedReservations = todayReservations.filter((reservation) => reservation.status !== "Platziert");
   const revenue = app.data.paymentRecords
     .filter((payment) => sameDay(payment.createdAt))
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const cashDay = activeCashDay();
+  const nextReservation = [...todayReservations]
+    .filter((reservation) => dateFromSwift(reservation.time) >= new Date())
+    .sort((a, b) => dateFromSwift(a.time) - dateFromSwift(b.time))[0];
   const activities = [
     ...todayReservations.map((reservation) => ({
       symbol: "R",
@@ -1296,19 +1316,29 @@ function renderOverview() {
 
   const holiday = upcomingHoliday();
   $("view").innerHTML = `
+    <section class="dashboard-hero">
+      <div>
+        <p class="eyebrow">Heute</p>
+        <h2>${escapeHTML(app.data.restaurantName || app.workspace?.restaurantName || "Haviko")}</h2>
+        <p>${formatDate(new Date(), { weekday: "long", day: "numeric", month: "long" })}${nextReservation ? ` · Nächste Reservierung ${formatDate(nextReservation.time, { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
+      </div>
+      <div class="dashboard-hero-status">
+        <span class="badge ${cashDay ? "green" : "orange"}">${cashDay ? "Kassentag offen" : "Kassentag geschlossen"}</span>
+        <span class="badge ${app.data.fiscalizationState === "ready" ? "green" : "orange"}">${app.data.fiscalizationState === "ready" ? "Fiskal bereit" : "Fiskal prüfen"}</span>
+      </div>
+    </section>
     ${holiday ? `<div class="compact-row no-icon" style="background:var(--purple-soft, #f2edfa);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>${escapeHTML(holiday.name)}</strong><span>${holiday.date.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })} · oft mehr Gäste als sonst</span></div></div>` : ""}
     <div id="dashboard-incident-banner"></div>
     <div id="weather-widget"></div>
-    <div class="metric-grid">
-      ${canManage() ? metric("Umsatz heute", formatCurrency(revenue), "Erfasste Zahlungen") : metric("Umsatz heute", "—", "Nur für Restaurantleitung")}
-      ${metric("Reservierungen", String(todayReservations.length), `${todayReservations.reduce((sum, item) => sum + Number(item.guests || 0), 0)} Personen`)}
-      ${metric("Aktive Tische", String(activeTables.length), `${app.data.tables.length} Tische insgesamt`)}
-      ${metric("Offene Bons", String(openTickets.length), `${openTickets.filter((ticket) => ticket.status === "Fertig").length} abholbereit`)}
+    <div class="metric-grid dashboard-metric-grid">
+      ${canManage() ? dashboardMetric("analytics", "Umsatz heute", formatCurrency(revenue), "Tippen für Statistik", "green") : dashboardMetric("analytics", "Umsatz heute", "—", "Nur für Restaurantleitung")}
+      ${dashboardMetric("reservations", "Reservierungen", String(todayReservations.length), `${todayReservations.reduce((sum, item) => sum + Number(item.guests || 0), 0)} Personen · ${expectedReservations.length} erwartet`, "orange")}
+      ${dashboardMetric("tables", "Aktive Tische", String(activeTables.length), `${app.data.tables.length} Tische insgesamt · ${seatedReservations.length} platziert`, "blue")}
+      ${dashboardMetric("orders", "Offene Bons", String(openTickets.length), `${readyTickets.length} abholbereit`, "purple")}
     </div>
-    ${renderWeeklyTrendSection()}
     <div class="split-layout">
       <section class="section">
-        <header class="section-header"><div><h2>Heute im Betrieb</h2><span>Live aus Haviko</span></div></header>
+        <header class="section-header"><div><h2>Live-Betrieb</h2><span>Reservierungen und Bons in zeitlicher Reihenfolge</span></div></header>
         <div class="section-body">
           ${activities.length ? `
             <div class="activity-list">${activities.map((item) => `
@@ -1320,15 +1350,18 @@ function renderOverview() {
         </div>
       </section>
       <section class="section">
-        <header class="section-header"><div><h2>Schnellzugriff</h2><span>Häufige Aktionen</span></div></header>
+        <header class="section-header"><div><h2>Schnellzugriff</h2><span>Die wichtigsten Arbeitsbereiche</span></div></header>
         <div class="section-body compact-list">
+          ${canManage() ? quickAction("analytics", "Statistik öffnen", "Umsatz, Bons und Team auswerten") : ""}
           ${quickAction("reservations", "Reservierung anlegen", "Gast und Tisch eintragen")}
           ${routeAllowed("tables") ? quickAction("tables", "Tisch öffnen", "Walk-in platzieren oder bestellen") : ""}
           ${routeAllowed("orders") ? quickAction("orders", "Bons prüfen", "Küche und Abholung") : ""}
+          ${routeAllowed("counter") ? quickAction("counter", "Theke öffnen", "Schnellverkauf vorbereiten") : ""}
           ${routeAllowed("shifts") ? quickAction("shifts", "Schicht verwalten", "Ein- und ausstempeln") : ""}
         </div>
       </section>
     </div>
+    ${renderWeeklyTrendSection()}
   `;
   renderDashboardIncidentBanner();
   loadWeatherWidget();
