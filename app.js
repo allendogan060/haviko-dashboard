@@ -8,6 +8,7 @@ const SUPABASE_KEY = "sb_publishable_VeeQLARNn-sULZ4snvp3HA_Hd78H5RN";
 const DEVELOPMENT_MODE = true;
 const AUTH_STORAGE_KEY = "servora-web-session";
 const LAST_RESTAURANT_KEY = "servora-web-restaurant";
+const WEB_MUTATION_QUEUE_KEY = "haviko-web-mutation-queue";
 const SHARED_SESSION_COOKIE = "haviko_web_session";
 const SHARED_RESTAURANT_COOKIE = "haviko_web_restaurant";
 const LOGIN_URL = "https://login.haviko.de/";
@@ -39,9 +40,12 @@ const app = {
   scheduleWeekOffset: 0,
   orderCart: [],
   orderTableID: null,
+  counterCart: [],
+  counterCategory: "Alle",
   reviews: [],
   loading: false,
   isLoggingOut: false,
+  isFlushingQueue: false,
   fiscalStatus: null
 };
 
@@ -88,7 +92,10 @@ const routes = [
   { id: "overview", title: "Start", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
   { id: "tables", title: "Tische", roles: ["restaurant_manager", "management", "service"] },
   { id: "orders", title: "Bestellungen", roles: ["restaurant_manager", "management", "service", "kitchen", "bar"] },
+  { id: "counter", title: "Theke", roles: ["restaurant_manager", "management", "service"] },
+  { id: "vouchers", title: "Gutscheine", roles: ["restaurant_manager", "management", "service"] },
   { id: "reservations", title: "Reservierungen", roles: ["restaurant_manager", "management", "service"] },
+  { id: "availability", title: "Verfügbarkeit", roles: ["restaurant_manager", "management"] },
   { id: "guests", title: "Gästeregister", roles: ["restaurant_manager", "management", "service"] },
   { id: "products", title: "Produkte", roles: ["restaurant_manager"] },
   { id: "team", title: "Team", roles: ["restaurant_manager"] },
@@ -105,7 +112,10 @@ const routeSlugs = {
   overview: "start",
   tables: "tische",
   orders: "bestellungen",
+  counter: "theke",
+  vouchers: "gutscheine",
   reservations: "reservierungen",
+  availability: "verfuegbarkeit",
   guests: "gaesteregister",
   products: "produkte",
   team: "team",
@@ -239,6 +249,103 @@ function activeCashDay() {
   return (app.data?.cashDaySessions || []).find((session) => session.status === "open") || null;
 }
 
+function cashMovementsForSession(session) {
+  if (!session) return [];
+  return (app.data?.cashMovements || [])
+    .filter((movement) => movement.cashDaySessionID === session.id)
+    .sort((a, b) => dateFromSwift(b.createdAt) - dateFromSwift(a.createdAt));
+}
+
+function movementTitle(kind) {
+  return kind === "deposit" ? "Einlage" : "Entnahme";
+}
+
+function netCashMovementsForSession(session, until = new Date()) {
+  return cashMovementsForSession(session)
+    .filter((movement) => {
+      const createdAt = dateFromSwift(movement.createdAt);
+      return createdAt && createdAt <= until;
+    })
+    .reduce((sum, movement) => {
+      const amount = Number(movement.amount || 0);
+      return sum + (movement.kind === "deposit" ? amount : -amount);
+    }, 0);
+}
+
+function cashRevenueForSession(session, until = new Date()) {
+  if (!session) return 0;
+  const openedAt = dateFromSwift(session.openedAt);
+  const cashMethodIDs = new Set(
+    app.data.paymentMethods.filter((method) => method.kind === "Bar").map((method) => method.id)
+  );
+  return app.data.paymentRecords
+    .filter((payment) => {
+      const createdAt = dateFromSwift(payment.createdAt);
+      return cashMethodIDs.has(payment.methodID)
+        && createdAt
+        && createdAt >= openedAt
+        && createdAt <= until;
+    })
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+}
+
+function expectedCashForSession(session, until = new Date()) {
+  return Number(session?.openingFloat || 0)
+    + cashRevenueForSession(session, until)
+    + netCashMovementsForSession(session, until);
+}
+
+function activePaymentMethods() {
+  return (app.data?.paymentMethods || []).filter((method) => method.isEnabled !== false);
+}
+
+function counterCartTotal() {
+  return app.counterCart.reduce(
+    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1),
+    0
+  );
+}
+
+function voucherStatus(voucher) {
+  if (voucher.isActive === false) return { title: "Gesperrt", className: "red" };
+  if (Number(voucher.remainingBalance || 0) <= 0) return { title: "Eingelöst", className: "" };
+  return { title: "Aktiv", className: "green" };
+}
+
+function voucherCodePreview(configuration = app.data?.voucherConfiguration || {}) {
+  const prefix = String(configuration.prefix || "GUT").trim().toUpperCase() || "GUT";
+  const length = Math.max(4, Math.min(16, Number(configuration.length || 6)));
+  const sample = configuration.style === "Nur Zahlen"
+    ? "1234567890".slice(0, length)
+    : configuration.style === "Nur Buchstaben"
+      ? "ABCDEFGHJKLMNPQRSTUVWXYZ".slice(0, length)
+      : "A7K2B9X4".slice(0, length);
+  return configuration.usesSeparator === false ? `${prefix}${sample}` : `${prefix}-${sample}`;
+}
+
+function timeFromMinutes(minutes) {
+  const value = Math.max(0, Math.min(23 * 60 + 59, Number(minutes || 0)));
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
+function minutesFromTime(value, fallback) {
+  const [hours, minutes] = String(value || "").split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return fallback;
+  return Math.max(0, Math.min(23 * 60 + 59, hours * 60 + minutes));
+}
+
+function weekdayName(weekday) {
+  return {
+    1: "Sonntag",
+    2: "Montag",
+    3: "Dienstag",
+    4: "Mittwoch",
+    5: "Donnerstag",
+    6: "Freitag",
+    7: "Samstag"
+  }[weekday] || "Tag";
+}
+
 function currentMember() {
   return (app.data?.team || []).find(
     (member) =>
@@ -251,6 +358,15 @@ function canManage() {
   return app.workspace?.role === "restaurant_manager";
 }
 
+async function enforceActiveMemberSession() {
+  const member = currentMember();
+  if (member && member.isActive === false) {
+    toast("Zugang deaktiviert", "Dieser Mitarbeiterzugang wurde deaktiviert.", "error");
+    await logout();
+    throw new Error("Member access disabled");
+  }
+}
+
 function routeAllowed(routeID) {
   const route = routes.find((item) => item.id === routeID);
   return Boolean(route?.roles.includes(app.workspace?.role));
@@ -260,7 +376,7 @@ function roleRouteList() {
   return routes.filter((route) => route.roles.includes(app.workspace?.role));
 }
 
-const CORE_NAV_ROUTES = ["overview", "tables", "orders", "reservations", "shifts"];
+const CORE_NAV_ROUTES = ["overview", "tables", "orders", "counter", "reservations"];
 
 function authHeaders(includeJSON = true) {
   const headers = {
@@ -305,17 +421,9 @@ async function rpc(name, parameters = {}) {
 
 function saveSession(session) {
   app.session = session;
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-  const sharedSession = {
-    access_token: session?.access_token,
-    refresh_token: session?.refresh_token,
-    expires_at: session?.expires_at,
-    expires_in: session?.expires_in,
-    token_type: session?.token_type
-  };
+  sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
   document.cookie =
-    `${SHARED_SESSION_COOKIE}=${encodeURIComponent(JSON.stringify(sharedSession))}; ` +
-    "Max-Age=2592000; Path=/; Domain=.haviko.de; Secure; SameSite=Lax";
+    `${SHARED_SESSION_COOKIE}=; Max-Age=0; Path=/; Domain=.haviko.de; Secure; SameSite=Lax`;
 }
 
 function readCookie(name) {
@@ -329,9 +437,8 @@ function readCookie(name) {
 
 function readStoredSession() {
   try {
-    const local = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
-    if (local?.access_token || local?.refresh_token) return local;
-    return JSON.parse(readCookie(SHARED_SESSION_COOKIE) || "null");
+    const session = JSON.parse(sessionStorage.getItem(AUTH_STORAGE_KEY) || "null");
+    return (session?.access_token || session?.refresh_token) ? session : null;
   } catch {
     return null;
   }
@@ -352,7 +459,7 @@ function clearSession() {
   app.session = null;
   app.workspace = null;
   app.data = null;
-  localStorage.removeItem(AUTH_STORAGE_KEY);
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
   localStorage.removeItem(LAST_RESTAURANT_KEY);
   document.cookie =
     `${SHARED_SESSION_COOKIE}=; Max-Age=0; Path=/; Domain=.haviko.de; Secure; SameSite=Lax`;
@@ -457,6 +564,7 @@ function defaultState(session) {
     tableOrders: {},
     tableSaleItems: {},
     tableRevenue: {},
+    tablePaidAmounts: {},
     activeShiftStart: null,
     activeBreakStart: null,
     accumulatedBreak: 0,
@@ -502,6 +610,7 @@ function defaultState(session) {
     },
     fiscalReceipts: [],
     cashDaySessions: [],
+    cashMovements: [],
     fiscalAuditEvents: [],
     inboxNotifications: []
   };
@@ -596,6 +705,95 @@ function objectToPairs(value) {
   return Object.entries(value || {}).flatMap(([key, val]) => [key, val]);
 }
 
+function patchForRPC(patch) {
+  const outgoingPatch = { ...patch };
+  for (const key of ["tableOrders", "tableSaleItems", "tableRevenue", "tablePaidAmounts"]) {
+    if (key in outgoingPatch) outgoingPatch[key] = objectToPairs(outgoingPatch[key]);
+  }
+  return outgoingPatch;
+}
+
+function queuedMutations() {
+  try {
+    return JSON.parse(localStorage.getItem(WEB_MUTATION_QUEUE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function writeQueuedMutations(queue) {
+  if (queue.length) localStorage.setItem(WEB_MUTATION_QUEUE_KEY, JSON.stringify(queue));
+  else localStorage.removeItem(WEB_MUTATION_QUEUE_KEY);
+}
+
+function applyLocalPatch(patch) {
+  app.data = normalizeState({ ...(app.data || {}), ...patch });
+  app.updatedAt = `local-${Date.now()}`;
+  render();
+}
+
+function queuePatchForSync(patch, message) {
+  const queue = queuedMutations();
+  queue.push({
+    id: uuid(),
+    restaurantID: app.workspace?.restaurantId || null,
+    patch,
+    message,
+    queuedAt: new Date().toISOString()
+  });
+  writeQueuedMutations(queue);
+  applyLocalPatch(patch);
+  setSyncState("error", `${queue.length} offline`);
+  const banner = $("offline-banner");
+  banner.textContent = `${queue.length} Änderung${queue.length === 1 ? "" : "en"} warten auf Synchronisierung.`;
+  banner.classList.remove("hidden");
+  toast("Offline vorgemerkt", "Die Änderung wird bei Wiederverbindung synchronisiert.", "success");
+  return true;
+}
+
+async function flushQueuedMutations() {
+  if (app.isFlushingQueue || !navigator.onLine || !app.workspace?.restaurantId) return;
+  let queue = queuedMutations().filter((item) => item.restaurantID === app.workspace.restaurantId);
+  if (!queue.length) return;
+  app.isFlushingQueue = true;
+  setSyncState("saving", `${queue.length} wartet`);
+  try {
+    await loadWorkspace(app.workspace.restaurantId);
+    queue = queuedMutations().filter((item) => item.restaurantID === app.workspace.restaurantId);
+    while (queue.length) {
+      const mutation = queue[0];
+      const result = await rpc("web_patch_restaurant_state", {
+        p_restaurant_id: app.workspace.restaurantId,
+        p_patch: patchForRPC(mutation.patch),
+        p_expected_updated_at: app.updatedAt
+      });
+      app.data = normalizeState(result.state);
+      app.updatedAt = result.updatedAt;
+      await enforceActiveMemberSession();
+      const remaining = queuedMutations().filter((item) => item.id !== mutation.id);
+      writeQueuedMutations(remaining);
+      queue = remaining.filter((item) => item.restaurantID === app.workspace.restaurantId);
+    }
+    setSyncState("ready", "Aktuell");
+    $("offline-banner").classList.add("hidden");
+    toast("Synchronisiert", "Offline-Änderungen wurden übertragen.", "success");
+    render();
+  } catch (error) {
+    if (String(error?.message || "").includes("STATE_CONFLICT")) {
+      await loadWorkspace(app.workspace.restaurantId);
+      setSyncState("error", "Konflikt");
+      toast("Konflikt", "Offline-Änderungen wurden nicht automatisch gemerged. Prüfe den aktuellen Stand und speichere erneut.", "error");
+    } else {
+      setSyncState("error", "Wartet");
+      const banner = $("offline-banner");
+      banner.textContent = "Offline-Änderungen warten weiter auf Synchronisierung.";
+      banner.classList.remove("hidden");
+    }
+  } finally {
+    app.isFlushingQueue = false;
+  }
+}
+
 function normalizeState(state = {}) {
   return {
     restaurantName: state.restaurantName || app.workspace?.restaurantName || "Restaurant",
@@ -620,6 +818,7 @@ function normalizeState(state = {}) {
     tableOrders: pairsToObject(state.tableOrders),
     tableSaleItems: pairsToObject(state.tableSaleItems),
     tableRevenue: pairsToObject(state.tableRevenue),
+    tablePaidAmounts: pairsToObject(state.tablePaidAmounts),
     activeShiftStart: state.activeShiftStart ?? null,
     activeBreakStart: state.activeBreakStart ?? null,
     accumulatedBreak: state.accumulatedBreak || 0,
@@ -651,6 +850,7 @@ function normalizeState(state = {}) {
     },
     fiscalReceipts: state.fiscalReceipts || [],
     cashDaySessions: state.cashDaySessions || [],
+    cashMovements: state.cashMovements || [],
     fiscalAuditEvents: state.fiscalAuditEvents || [],
     inboxNotifications: state.inboxNotifications || [],
     loyaltyConfiguration: state.loyaltyConfiguration || {
@@ -688,6 +888,7 @@ async function loadWorkspace(restaurantID = null) {
   app.workspace = result;
   app.data = normalizeState(result.state);
   app.updatedAt = result.updatedAt;
+  await enforceActiveMemberSession();
   saveLastRestaurant(result.restaurantId);
   showWorkspace();
   setSyncState("ready", "Aktuell");
@@ -715,6 +916,17 @@ async function checkSessionStillValid() {
       } else {
         showAuth();
       }
+    } else if (
+      result.updatedAt
+      && result.updatedAt !== app.updatedAt
+      && !queuedMutations().some((item) => item.restaurantID === app.workspace.restaurantId)
+    ) {
+      app.workspace = result;
+      app.data = normalizeState(result.state);
+      app.updatedAt = result.updatedAt;
+      await enforceActiveMemberSession();
+      setSyncState("ready", "Aktualisiert");
+      render();
     }
   } catch {
     /* transient network errors shouldn't force a logout */
@@ -723,22 +935,18 @@ async function checkSessionStillValid() {
 
 async function savePatch(patch, message = "Gespeichert") {
   if (!navigator.onLine) {
-    toast("Offline", "Änderungen sind erst wieder online möglich.", "error");
-    return false;
+    return queuePatchForSync(patch, message);
   }
   setSyncState("saving", "Synchronisiert");
   try {
-    const outgoingPatch = { ...patch };
-    for (const key of ["tableOrders", "tableSaleItems", "tableRevenue"]) {
-      if (key in outgoingPatch) outgoingPatch[key] = objectToPairs(outgoingPatch[key]);
-    }
     const result = await rpc("web_patch_restaurant_state", {
       p_restaurant_id: app.workspace.restaurantId,
-      p_patch: outgoingPatch,
+      p_patch: patchForRPC(patch),
       p_expected_updated_at: app.updatedAt
     });
     app.data = normalizeState(result.state);
     app.updatedAt = result.updatedAt;
+    await enforceActiveMemberSession();
     setSyncState("ready", "Aktuell");
     toast("Erledigt", message, "success");
     render();
@@ -753,6 +961,11 @@ async function savePatch(patch, message = "Gespeichert") {
       );
     } else {
       setSyncState("error", "Fehler");
+      if (navigator.onLine && /network|fetch|failed|timeout|timed out/i.test(String(error?.message || ""))) {
+        queuePatchForSync(patch, message);
+        setSyncState("error", "Backend nicht erreichbar");
+        return true;
+      }
       toast("Nicht gespeichert", friendlyError(error), "error");
     }
     return false;
@@ -913,7 +1126,10 @@ function render() {
   switch (app.route) {
     case "tables": renderTables(); break;
     case "orders": renderOrders(); break;
+    case "counter": renderCounter(); break;
+    case "vouchers": renderVouchers(); break;
     case "reservations": renderReservations(); break;
+    case "availability": renderAvailability(); break;
     case "guests": renderGuests(); break;
     case "products": renderProducts(); break;
     case "team": renderTeam(); break;
@@ -1193,8 +1409,29 @@ function memberInitials(name) {
 }
 
 function tableRunningTotal(tableID) {
-  return (app.data.tableSaleItems[tableID] || [])
+  const bookedRevenue = Number(app.data.tableRevenue?.[tableID] || 0);
+  const openSaleItems = (app.data.tableSaleItems?.[tableID] || [])
     .reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
+  return bookedRevenue + openSaleItems;
+}
+
+function tableRemainingBalance(tableID) {
+  return Math.max(0, tableRunningTotal(tableID) - Number(app.data.tablePaidAmounts?.[tableID] || 0));
+}
+
+function cashDayClosingIssues() {
+  const occupiedTables = app.data.tables.filter((table) => table.status === "besetzt").length;
+  const unsubmittedItems = Object.values(app.data.tableOrders || {})
+    .flat()
+    .reduce((sum, item) => sum + Number(item.quantity || 1), 0);
+  const unpaidTables = app.data.tables
+    .filter((table) => table.status === "besetzt" && tableRemainingBalance(table.id) > 0.005)
+    .length;
+  const issues = [];
+  if (occupiedTables > 0) issues.push(`${occupiedTables} belegte Tische`);
+  if (unsubmittedItems > 0) issues.push(`${unsubmittedItems} noch nicht bonierte Positionen`);
+  if (unpaidTables > 0) issues.push(`${unpaidTables} Tische mit offenem Betrag`);
+  return issues;
 }
 
 function upcomingReservationForTable(tableID, date = new Date()) {
@@ -1345,6 +1582,221 @@ function ticketCard(ticket) {
   `;
 }
 
+function renderCounter() {
+  const categories = ["Alle", ...new Set(app.data.categories || [])];
+  if (!categories.includes(app.counterCategory)) app.counterCategory = "Alle";
+  const products = [...app.data.products]
+    .filter((product) => product.isAvailable !== false)
+    .filter((product) => app.counterCategory === "Alle" || product.category === app.counterCategory)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), "de"));
+  const cartTotal = counterCartTotal();
+  const cashDay = activeCashDay();
+  const fiscalReady = app.data.fiscalizationState === "ready" || app.data.fiscalizationState === "testMode";
+  $("view").innerHTML = `
+    <div class="page-tools">
+      <div><h2>Theke</h2><p>Schnellverkauf mit denselben Produkten, Preisen und Zahlungsarten wie in der App.</p></div>
+      <div class="tool-actions">
+        <span class="badge ${cashDay ? "green" : "orange"}">${cashDay ? "Kassentag offen" : "Kassentag geschlossen"}</span>
+        <span class="badge ${fiscalReady ? "green" : "orange"}">${fiscalReady ? "Fiskal bereit" : "Fiskal offen"}</span>
+      </div>
+    </div>
+    <div class="filter-row">
+      ${categories.map((category) => `<button class="filter-button ${category === app.counterCategory ? "selected" : ""}" type="button" data-counter-category="${escapeHTML(category)}">${escapeHTML(category)}</button>`).join("")}
+    </div>
+    <div class="counter-layout">
+      <section class="section">
+        <header class="section-header"><h2>Produkte</h2><span class="badge">${products.length}</span></header>
+        <div class="section-body">
+          ${products.length ? `<div class="product-grid equal-tile-grid">
+            ${products.map((product) => `
+              <button class="product-card counter-product-card" type="button" data-counter-product-id="${escapeHTML(product.id)}" style="--product-color:${itemColor(product.colorName)}">
+                <header><div><h3>${escapeHTML(product.name)}</h3><p>${escapeHTML(product.category)} · ${escapeHTML(product.station)}</p></div></header>
+                <strong>${formatCurrency(product.price)}</strong>
+                <footer><span class="badge">${Number(product.taxRate || 0)} % MwSt.</span><span class="row-button">Hinzufügen</span></footer>
+              </button>`).join("")}
+          </div>` : emptyHTML("Keine Produkte", "Aktive Produkte erscheinen hier für den Thekenverkauf.")}
+        </div>
+      </section>
+      <aside class="section">
+        <header class="section-header"><h2>Warenkorb</h2><strong>${formatCurrency(cartTotal)}</strong></header>
+        <div class="section-body compact-list">
+          ${app.counterCart.length ? app.counterCart.map((item) => `
+            <div class="compact-row no-icon">
+              <div class="activity-copy"><strong>${Number(item.quantity || 1)}× ${escapeHTML(item.name)}</strong><span>${formatCurrency(item.price)} Einzelpreis</span></div>
+              <div class="row-actions">
+                <button class="row-button" type="button" data-counter-dec-id="${escapeHTML(item.id)}">−</button>
+                <button class="row-button" type="button" data-counter-inc-id="${escapeHTML(item.id)}">+</button>
+                <button class="row-button danger-text" type="button" data-counter-remove-id="${escapeHTML(item.id)}">Entfernen</button>
+              </div>
+            </div>`).join("") : emptyHTML("Warenkorb leer", "Wähle links Produkte aus.")}
+        </div>
+        <div class="section-body">
+          <div class="inline-alert">
+            <strong>Web-Abschluss benötigt zentrale Fiskal-RPC</strong>
+            <span>Produktauswahl und Warenkorb sind vorbereitet. Zahlung/Beleg werden erst aktiviert, sobald Web und App dieselbe serverseitige Checkout-Transaktion nutzen.</span>
+          </div>
+          <button class="primary full" type="button" data-action="counter-checkout" ${!app.counterCart.length || !cashDay || !fiscalReady ? "disabled" : ""}>Zahlung vorbereiten</button>
+        </div>
+      </aside>
+    </div>
+  `;
+}
+
+function renderVouchers() {
+  const vouchers = [...app.data.vouchers].sort(
+    (a, b) => dateFromSwift(b.createdAt) - dateFromSwift(a.createdAt)
+  );
+  const active = vouchers.filter((voucher) => voucher.isActive !== false && Number(voucher.remainingBalance || 0) > 0);
+  const remaining = active.reduce((sum, voucher) => sum + Number(voucher.remainingBalance || 0), 0);
+  const configuration = app.data.voucherConfiguration || {};
+  $("view").innerHTML = `
+    <div class="page-tools">
+      <div><h2>Gutscheine</h2><p>Gutscheinbestand, Restwerte und Codeformat wie in der App.</p></div>
+      <div class="tool-actions"><button class="secondary" type="button" data-action="voucher-settings">Codeformat</button></div>
+    </div>
+    <div class="metric-grid">
+      ${metric("Aktive Gutscheine", String(active.length), "mit offenem Restwert")}
+      ${metric("Offener Wert", formatCurrency(remaining), "noch nicht eingelöst")}
+      ${metric("Ausgestellt", String(vouchers.length), "gesamt")}
+      ${metric("Code-Beispiel", voucherCodePreview(configuration), "aktuelles Format")}
+    </div>
+    <section class="section table-section">
+      <header class="section-header"><h2>Gutscheinliste</h2><span class="badge">${vouchers.length}</span></header>
+      ${vouchers.length ? `<table class="data-table">
+        <thead><tr><th>Code</th><th>Ausgestellt</th><th>Startwert</th><th>Restwert</th><th>Status</th><th></th></tr></thead>
+        <tbody>${vouchers.map((voucher) => {
+          const status = voucherStatus(voucher);
+          return `
+            <tr>
+              <td><strong>${escapeHTML(voucher.code)}</strong><br><small>${escapeHTML(voucher.createdBy || "–")}</small></td>
+              <td>${formatDate(voucher.createdAt, { dateStyle: "medium" })}</td>
+              <td>${formatCurrency(voucher.initialBalance)}</td>
+              <td>${formatCurrency(voucher.remainingBalance)}</td>
+              <td><span class="badge ${status.className}">${status.title}</span></td>
+              <td><button class="row-button" type="button" data-voucher-id="${escapeHTML(voucher.id)}">Details</button></td>
+            </tr>`;
+        }).join("")}</tbody>
+      </table>` : emptyHTML("Noch keine Gutscheine", "Verkaufte Gutscheine erscheinen nach dem Checkout hier.")}
+    </section>
+  `;
+}
+
+function addCounterProduct(productID) {
+  const product = app.data.products.find((item) => item.id === productID);
+  if (!product || product.isAvailable === false) return;
+  const existing = app.counterCart.find((item) => item.productID === productID);
+  if (existing) {
+    existing.quantity = Number(existing.quantity || 1) + 1;
+  } else {
+    app.counterCart.push({
+      id: uuid(),
+      productID: product.id,
+      name: product.name,
+      price: Number(product.price || 0),
+      quantity: 1,
+      taxRate: Number(product.taxRate || 0),
+      station: product.station,
+      itemKind: "product"
+    });
+  }
+  renderCounter();
+}
+
+function updateCounterCartItem(itemID, delta) {
+  const item = app.counterCart.find((entry) => entry.id === itemID);
+  if (!item) return;
+  item.quantity = Math.max(1, Number(item.quantity || 1) + delta);
+  renderCounter();
+}
+
+function removeCounterCartItem(itemID) {
+  app.counterCart = app.counterCart.filter((item) => item.id !== itemID);
+  renderCounter();
+}
+
+function openCounterCheckout() {
+  const cashDay = activeCashDay();
+  const methods = activePaymentMethods();
+  openModal({
+    eyebrow: "Theke",
+    title: "Zahlung vorbereiten",
+    body: `
+      <div class="detail-list">
+        <div><span>Summe</span><strong>${formatCurrency(counterCartTotal())}</strong></div>
+        <div><span>Kassentag</span><strong>${cashDay ? "Offen" : "Geschlossen"}</strong></div>
+        <div><span>Zahlungsarten</span><strong>${methods.map((method) => method.name).join(", ") || "Keine"}</strong></div>
+      </div>
+      <div class="inline-alert">
+        <strong>Checkout noch nicht freigeschaltet</strong>
+        <span>Für App/Web-Gleichstand fehlt noch die gemeinsame serverseitige Checkout-Transaktion mit Fiskalbeleg, Idempotency und Gutscheinbuchung.</span>
+      </div>
+    `,
+    footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
+  });
+}
+
+function openVoucherDetail(voucherID) {
+  const voucher = app.data.vouchers.find((item) => item.id === voucherID);
+  if (!voucher) return;
+  const status = voucherStatus(voucher);
+  const canManage = ["restaurant_manager", "management"].includes(app.workspace?.role);
+  openModal({
+    eyebrow: "Gutschein",
+    title: voucher.code,
+    body: `
+      <div class="detail-list">
+        <div><span>Status</span><strong><span class="badge ${status.className}">${status.title}</span></strong></div>
+        <div><span>Startwert</span><strong>${formatCurrency(voucher.initialBalance)}</strong></div>
+        <div><span>Restwert</span><strong>${formatCurrency(voucher.remainingBalance)}</strong></div>
+        <div><span>Ausgestellt</span><strong>${formatDate(voucher.createdAt)}</strong></div>
+        <div><span>Erstellt von</span><strong>${escapeHTML(voucher.createdBy || "–")}</strong></div>
+      </div>
+    `,
+    footer: `${canManage ? `<button class="secondary" type="button" data-modal-action="toggle-voucher" data-id="${escapeHTML(voucher.id)}">${voucher.isActive === false ? "Aktivieren" : "Sperren"}</button>` : ""}<button class="primary" type="button" data-modal-action="close">Fertig</button>`
+  });
+}
+
+async function toggleVoucher(voucherID) {
+  const vouchers = app.data.vouchers.map((voucher) =>
+    voucher.id === voucherID ? { ...voucher, isActive: voucher.isActive === false } : voucher
+  );
+  if (await savePatch({ vouchers }, "Gutscheinstatus wurde gespeichert.")) closeModal();
+}
+
+function openVoucherSettings() {
+  const configuration = app.data.voucherConfiguration || {};
+  openModal({
+    eyebrow: "Gutscheine",
+    title: "Codeformat",
+    body: `
+      <form id="voucher-settings-form">
+        <div class="field-grid">
+          <label class="field"><span>Format</span><select id="voucher-style">
+            ${["Buchstaben + Zahlen", "Nur Zahlen", "Nur Buchstaben"].map((style) => `<option value="${style}" ${configuration.style === style ? "selected" : ""}>${style}</option>`).join("")}
+          </select></label>
+          <label class="field"><span>Prefix</span><input id="voucher-prefix" maxlength="8" value="${escapeHTML(configuration.prefix || "GUT")}"></label>
+          <label class="field"><span>Länge</span><input id="voucher-length" type="number" min="4" max="16" value="${Number(configuration.length || 6)}"></label>
+          <label class="check-row"><input id="voucher-separator" type="checkbox" ${configuration.usesSeparator === false ? "" : "checked"}><span>Trennzeichen verwenden</span></label>
+        </div>
+        <p class="modal-note">Beispiel: <strong>${escapeHTML(voucherCodePreview(configuration))}</strong></p>
+      </form>
+    `,
+    footer: `<button class="secondary" type="button" data-modal-action="close">Abbrechen</button><button class="primary" type="button" data-modal-action="save-voucher-settings">Speichern</button>`
+  });
+}
+
+async function saveVoucherSettings() {
+  const prefix = $("voucher-prefix")?.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "GUT";
+  const length = Math.max(4, Math.min(16, Number($("voucher-length")?.value || 6)));
+  const configuration = {
+    style: $("voucher-style")?.value || "Buchstaben + Zahlen",
+    prefix,
+    length,
+    usesSeparator: $("voucher-separator")?.checked !== false
+  };
+  if (await savePatch({ voucherConfiguration: configuration }, "Gutscheinformat wurde gespeichert.")) closeModal();
+}
+
 function renderReservations() {
   const reservations = app.data.reservations
     .filter((reservation) => sameDay(reservation.time, app.reservationDate))
@@ -1384,6 +1836,151 @@ function renderReservations() {
         </table>` : emptyHTML("Keine Reservierungen", "Für dieses Datum wurden noch keine Gäste eingetragen.")}
     </section>
   `;
+}
+
+function renderAvailability() {
+  const configuration = structuredClone(
+    app.data.onlineBookingConfiguration || defaultOnlineBookingConfiguration(app.workspace)
+  );
+  const settings = configuration.restaurant.settings;
+  const days = [...(settings.dayAvailability || [])].sort((a, b) => {
+    const order = (weekday) => (weekday === 1 ? 7 : weekday - 1);
+    return order(a.id) - order(b.id);
+  });
+  $("view").innerHTML = `
+    <div class="page-tools">
+      <div><h2>Verfügbarkeit</h2><p>Online-Buchungszeiten, Vorlauf und Sperrzeiten wie in der App.</p></div>
+      <div class="tool-actions"><button class="primary" type="button" data-action="save-availability">Speichern</button></div>
+    </div>
+    <section class="section">
+      <header class="section-header"><h2>Buchungsregeln</h2><span class="badge ${settings.bookingEnabled ? "green" : "orange"}">${settings.bookingEnabled ? "Online aktiv" : "Online pausiert"}</span></header>
+      <div class="section-body">
+        <form id="availability-form">
+          <div class="field-grid">
+            <label class="check-row"><input id="availability-enabled" type="checkbox" ${settings.bookingEnabled ? "checked" : ""}><span>Online-Reservierung aktiv</span></label>
+            <label class="check-row"><input id="availability-auto-confirm" type="checkbox" ${settings.automaticConfirmation ? "checked" : ""}><span>Automatisch bestätigen</span></label>
+            <label class="field"><span>Standarddauer (Min.)</span><input id="availability-duration" type="number" min="15" max="360" step="15" value="${Number(settings.standardDurationMinutes || 90)}"></label>
+            <label class="field"><span>Mindestvorlauf (Min.)</span><input id="availability-lead" type="number" min="0" max="10080" step="15" value="${Number(settings.minimumLeadMinutes || 120)}"></label>
+            <label class="field"><span>Max. Tage im Voraus</span><input id="availability-advance" type="number" min="1" max="365" value="${Number(settings.maximumAdvanceDays || 90)}"></label>
+            <label class="field"><span>Max. Personen</span><input id="availability-party" type="number" min="1" max="99" value="${Number(settings.maximumPartySize || 10)}"></label>
+            <label class="field"><span>Slot-Intervall (Min.)</span><input id="availability-slot" type="number" min="5" max="120" step="5" value="${Number(settings.slotIntervalMinutes || 15)}"></label>
+            <label class="field"><span>Puffer (Min.)</span><input id="availability-buffer" type="number" min="0" max="180" step="5" value="${Number(settings.bufferMinutes || 15)}"></label>
+          </div>
+        </form>
+      </div>
+    </section>
+    <section class="section table-section">
+      <header class="section-header"><h2>Wochentage</h2></header>
+      <table class="data-table availability-table">
+        <thead><tr><th>Tag</th><th>Online</th><th>Von</th><th>Bis</th></tr></thead>
+        <tbody>${days.map((day) => {
+          const window = day.windows?.[0] || { startMinutes: 18 * 60, endMinutes: 21 * 60 };
+          return `
+            <tr data-availability-day="${day.id}">
+              <td><strong>${weekdayName(day.id)}</strong></td>
+              <td><label class="switch"><input id="availability-day-${day.id}" type="checkbox" ${day.isOpen ? "checked" : ""}><span></span></label></td>
+              <td><input id="availability-start-${day.id}" type="time" value="${timeFromMinutes(window.startMinutes)}"></td>
+              <td><input id="availability-end-${day.id}" type="time" value="${timeFromMinutes(window.endMinutes)}"></td>
+            </tr>`;
+        }).join("")}</tbody>
+      </table>
+    </section>
+    <section class="section table-section">
+      <header class="section-header">
+        <h2>Sperrzeiten</h2>
+        <button class="secondary" type="button" data-action="add-blocked-period">+ Sperrzeit</button>
+      </header>
+      ${(settings.blockedPeriods || []).length ? `<table class="data-table">
+        <thead><tr><th>Titel</th><th>Von</th><th>Bis</th><th></th></tr></thead>
+        <tbody>${settings.blockedPeriods.map((period) => `
+          <tr>
+            <td><strong>${escapeHTML(period.title || "Sperrzeit")}</strong></td>
+            <td>${formatDate(period.startsAt || period.start, { dateStyle: "medium", timeStyle: "short" })}</td>
+            <td>${formatDate(period.endsAt || period.end, { dateStyle: "medium", timeStyle: "short" })}</td>
+            <td><button class="row-button danger-text" type="button" data-blocked-period-remove="${escapeHTML(period.id)}">Entfernen</button></td>
+          </tr>`).join("")}</tbody>
+      </table>` : emptyHTML("Keine Sperrzeiten", "Geschlossene Tage oder Sonderzeiten kannst du hier sperren.")}
+    </section>
+  `;
+}
+
+async function saveAvailability() {
+  const configuration = structuredClone(
+    app.data.onlineBookingConfiguration || defaultOnlineBookingConfiguration(app.workspace)
+  );
+  const settings = configuration.restaurant.settings;
+  settings.bookingEnabled = $("availability-enabled")?.checked || false;
+  settings.automaticConfirmation = $("availability-auto-confirm")?.checked || false;
+  settings.standardDurationMinutes = Math.max(15, Math.min(360, Number($("availability-duration")?.value || 90)));
+  settings.minimumLeadMinutes = Math.max(0, Math.min(10080, Number($("availability-lead")?.value || 120)));
+  settings.maximumAdvanceDays = Math.max(1, Math.min(365, Number($("availability-advance")?.value || 90)));
+  settings.maximumPartySize = Math.max(1, Math.min(99, Number($("availability-party")?.value || 10)));
+  settings.slotIntervalMinutes = Math.max(5, Math.min(120, Number($("availability-slot")?.value || 15)));
+  settings.bufferMinutes = Math.max(0, Math.min(180, Number($("availability-buffer")?.value || 15)));
+  settings.dayAvailability = [1, 2, 3, 4, 5, 6, 7].map((weekday) => {
+    const existing = (settings.dayAvailability || []).find((day) => day.id === weekday) || {};
+    const start = minutesFromTime($(`availability-start-${weekday}`)?.value, 18 * 60);
+    const end = minutesFromTime($(`availability-end-${weekday}`)?.value, 21 * 60);
+    return {
+      ...existing,
+      id: weekday,
+      isOpen: $(`availability-day-${weekday}`)?.checked || false,
+      windows: [{
+        id: existing.windows?.[0]?.id || uuid(),
+        startMinutes: Math.min(start, Math.max(start + 15, end)),
+        endMinutes: Math.max(end, start + 15)
+      }]
+    };
+  });
+  await savePatch({ onlineBookingConfiguration: configuration }, "Verfügbarkeit wurde gespeichert.");
+}
+
+function openBlockedPeriodEditor() {
+  const today = localDateInput(new Date());
+  openModal({
+    eyebrow: "Verfügbarkeit",
+    title: "Sperrzeit",
+    body: `
+      <form id="blocked-period-form">
+        <label class="field"><span>Titel</span><input id="blocked-title" value="Geschlossen"></label>
+        <div class="field-grid">
+          <label class="field"><span>Von</span><input id="blocked-start" type="datetime-local" value="${today}T12:00"></label>
+          <label class="field"><span>Bis</span><input id="blocked-end" type="datetime-local" value="${today}T23:00"></label>
+        </div>
+      </form>
+    `,
+    footer: `<button class="secondary" type="button" data-modal-action="close">Abbrechen</button><button class="primary" type="button" data-modal-action="save-blocked-period">Speichern</button>`
+  });
+}
+
+async function saveBlockedPeriod() {
+  const start = new Date($("blocked-start")?.value || "");
+  const end = new Date($("blocked-end")?.value || "");
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    toast("Sperrzeit prüfen", "Ende muss nach Beginn liegen.", "error");
+    return;
+  }
+  const configuration = structuredClone(
+    app.data.onlineBookingConfiguration || defaultOnlineBookingConfiguration(app.workspace)
+  );
+  const periods = configuration.restaurant.settings.blockedPeriods || [];
+  periods.push({
+    id: uuid(),
+    title: $("blocked-title")?.value.trim() || "Sperrzeit",
+    startsAt: swiftDate(start),
+    endsAt: swiftDate(end)
+  });
+  configuration.restaurant.settings.blockedPeriods = periods;
+  if (await savePatch({ onlineBookingConfiguration: configuration }, "Sperrzeit wurde gespeichert.")) closeModal();
+}
+
+async function removeBlockedPeriod(periodID) {
+  const configuration = structuredClone(
+    app.data.onlineBookingConfiguration || defaultOnlineBookingConfiguration(app.workspace)
+  );
+  configuration.restaurant.settings.blockedPeriods =
+    (configuration.restaurant.settings.blockedPeriods || []).filter((period) => period.id !== periodID);
+  await savePatch({ onlineBookingConfiguration: configuration }, "Sperrzeit wurde entfernt.");
 }
 
 function statusBadge(status) {
@@ -2044,6 +2641,14 @@ function cashDayReport(session) {
     .filter((payment) => methodKind(payment.methodID) === kind)
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const revenue = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const movements = cashMovementsForSession(session).filter((movement) => {
+    const at = dateFromSwift(movement.createdAt);
+    return at && at >= opened && at <= closed;
+  });
+  const netMovements = movements.reduce((sum, movement) => {
+    const amount = Number(movement.amount || 0);
+    return sum + (movement.kind === "deposit" ? amount : -amount);
+  }, 0);
   const receiptCount = app.data.fiscalReceipts.filter(inWindow).length;
   const guestCount = app.data.reservations
     .filter((reservation) =>
@@ -2064,6 +2669,8 @@ function cashDayReport(session) {
     cashRevenue: sumBy("Bar"),
     cardRevenue: sumBy("Karte"),
     voucherRevenue: sumBy("Gutschein"),
+    movements,
+    netMovements,
     receiptCount,
     guestCount,
     team
@@ -2197,12 +2804,15 @@ function openCashDayReport(sessionID) {
         <div><span>Bar</span><strong>${formatCurrency(report.cashRevenue)}</strong></div>
         <div><span>Karte</span><strong>${formatCurrency(report.cardRevenue)}</strong></div>
         <div><span>Gutschein</span><strong>${formatCurrency(report.voucherRevenue)}</strong></div>
+        <div><span>Kassenbewegungen</span><strong>${formatCurrency(report.netMovements)}</strong></div>
         <div><span>Sollbestand</span><strong>${formatCurrency(session.expectedCash)}</strong></div>
         <div><span>Istbestand</span><strong>${formatCurrency(session.actualCash)}</strong></div>
         <div><span>Differenz</span><strong>${formatCurrency(difference)}</strong></div>
         <div><span>Belege</span><strong>${report.receiptCount}</strong></div>
         <div><span>Gäste</span><strong>${report.guestCount}</strong></div>
       </div>
+      ${report.movements.length ? `<div class="activity-list">${report.movements.map((movement) => `
+        <article class="activity-row no-icon"><div class="activity-copy"><strong>${escapeHTML(movementTitle(movement.kind))}</strong><span>${formatDate(movement.createdAt)}${movement.note ? ` · ${escapeHTML(movement.note)}` : ""}</span></div><strong>${movement.kind === "deposit" ? "+" : "-"}${formatCurrency(movement.amount)}</strong></article>`).join("")}</div>` : ""}
       ${report.team.length ? `<div class="activity-list">${report.team.map((member) => `
         <article class="activity-row no-icon"><div class="activity-copy"><strong>${escapeHTML(member.name)}</strong><span>${durationText(member.workedSeconds)}</span></div><strong>${formatCurrency(member.revenue)}</strong></article>`).join("")}</div>` : ""}
       ${session.closingNote ? `<p class="modal-note">${escapeHTML(session.closingNote)}</p>` : ""}
@@ -2241,6 +2851,7 @@ function openReceiptDetail(receiptID) {
   const receipt = app.data.fiscalReceipts.find((item) => item.id === receiptID);
   if (!receipt) return;
   const items = Array.isArray(receipt.items) ? receipt.items : [];
+  const qrCodeData = receipt.qrCodeData || receipt.tseProcessData || "";
   openModal({
     eyebrow: "Beleg",
     title: receipt.invoiceNumber || "Beleg",
@@ -2261,6 +2872,7 @@ function openReceiptDetail(receiptID) {
         <div><span>Transaktion Nr.</span><strong>${receipt.tseTransactionNumber ?? "–"}</strong></div>
         <div><span>Signaturzähler</span><strong>${receipt.tseSignatureCounter ?? "–"}</strong></div>
         <div><span>Signatur</span><strong style="word-break:break-all;">${escapeHTML(receipt.tseSignature || "–")}</strong></div>
+        <div><span>QR-/Prozessdaten</span><strong style="word-break:break-all;">${escapeHTML(qrCodeData || "–")}</strong></div>
       </div>
     `,
     footer: `<button class="primary" type="button" data-modal-action="close">Fertig</button>`
@@ -2341,12 +2953,104 @@ async function saveKitchenOperatingMode() {
 
 const SETTINGS_TABS = [
   { id: "restaurant", title: "Restaurant" },
+  { id: "billing", title: "Abrechnung" },
   { id: "betrieb", title: "Betrieb" },
   { id: "reservierung", title: "Online-Reservierung" },
   { id: "kundenbindung", title: "Kundenbindung" },
   { id: "kasse", title: "Kasse" },
   { id: "geraete", title: "Geräte & Drucker" }
 ];
+
+const HAVIKO_PLUS_MONTHLY_PRICE = 0;
+
+function accountCreatedDate() {
+  const candidates = [
+    app.workspace?.createdAt,
+    app.data?.accountCreatedAt,
+    app.data?.servoraPlusEntitlement?.grantedAt,
+    app.data?.servoraPlusEntitlement?.validUntil
+  ].map(dateFromSwift).filter((date) => date && !Number.isNaN(date.getTime()));
+  return candidates.sort((a, b) => a - b)[0] || new Date();
+}
+
+function hasHavikoPlusAccess() {
+  const entitlement = app.data?.servoraPlusEntitlement;
+  if (!entitlement) return false;
+  if (entitlement.plan !== "servoraPlus" || entitlement.isActive === false) return false;
+  const validUntil = dateFromSwift(entitlement.validUntil);
+  return !validUntil || validUntil > new Date();
+}
+
+function havikoPlusStatusTitle() {
+  const entitlement = app.data?.servoraPlusEntitlement;
+  if (hasHavikoPlusAccess()) {
+    if (entitlement?.accessSource === "servoraPlusBetaAccess") return "Haviko+ Testzugang aktiv";
+    if (entitlement?.accessSource === "servoraPlusManualEntitlement") return "Haviko+ freigeschaltet";
+    return "Haviko+ aktiv";
+  }
+  return "Haviko+ nicht aktiviert";
+}
+
+function billingMonths() {
+  const start = accountCreatedDate();
+  const today = new Date();
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const end = new Date(today.getFullYear(), today.getMonth(), 1);
+  const months = [];
+  while (cursor <= end) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+    const label = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(cursor);
+    months.push({
+      key,
+      label,
+      amount: hasHavikoPlusAccess() ? HAVIKO_PLUS_MONTHLY_PRICE : 0,
+      status: hasHavikoPlusAccess() ? "Haviko+" : "Free"
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return months.reverse();
+}
+
+function billingInvoiceNumber(month) {
+  const code = String(app.workspace?.restaurantCode || app.data?.restaurantCode || "HAVIKO").replace(/[^A-Z0-9]/gi, "").toUpperCase();
+  return `HAV-${code}-${month.key}`;
+}
+
+function billingInvoiceHTML(month) {
+  const invoiceNumber = billingInvoiceNumber(month);
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${invoiceNumber}</title>
+    <style>
+      @page { size: A4; margin: 18mm; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #10231f; margin: 0; }
+      header { display:flex; justify-content:space-between; border-bottom:2px solid #0b4f43; padding-bottom:18px; margin-bottom:28px; }
+      h1 { margin:0; font-size:28px; } h2 { margin:0 0 8px; font-size:16px; }
+      .muted { color:#66736f; } .box { border:1px solid #d9e1de; border-radius:8px; padding:14px; }
+      table { width:100%; border-collapse:collapse; margin-top:24px; } th, td { padding:12px; border-bottom:1px solid #d9e1de; text-align:left; }
+      th:last-child, td:last-child { text-align:right; } tfoot td { font-weight:800; font-size:17px; }
+      footer { position:fixed; bottom:0; left:0; right:0; border-top:1px solid #d9e1de; padding-top:10px; font-size:11px; color:#66736f; }
+    </style></head><body>
+    <header><div><h1>Haviko</h1><div class="muted">Monatsabrechnung</div></div><div><strong>${invoiceNumber}</strong><br><span class="muted">${escapeHTML(month.label)}</span></div></header>
+    <section class="box"><h2>Rechnung an</h2><strong>${escapeHTML(app.data.restaurantName || app.workspace?.restaurantName || "Restaurant")}</strong><br><span class="muted">Restaurantkennung ${escapeHTML(app.workspace?.restaurantCode || app.data.restaurantCode || "–")}</span></section>
+    <table><thead><tr><th>Leistung</th><th>Zeitraum</th><th>Betrag</th></tr></thead><tbody>
+      <tr><td>Haviko+ ${month.status === "Haviko+" ? "Mitgliedschaft" : "Free / kein aktives Haviko+"}</td><td>${escapeHTML(month.label)}</td><td>${formatCurrency(month.amount)}</td></tr>
+    </tbody><tfoot><tr><td colspan="2">Gesamt</td><td>${formatCurrency(month.amount)}</td></tr></tfoot></table>
+    <p class="muted">Diese Rechnung wird aus dem gemeinsamen Haviko Konto- und Haviko+ Status erzeugt.</p>
+    <footer>Haviko · Monatsabrechnung · ${invoiceNumber}</footer></body></html>`;
+}
+
+function downloadBillingInvoice(monthKey) {
+  const month = billingMonths().find((item) => item.key === monthKey);
+  if (!month) return;
+  const win = window.open("", "_blank", "noopener,noreferrer");
+  if (!win) {
+    toast("Popup blockiert", "Erlaube Popups, um die Rechnung als PDF zu speichern.", "error");
+    return;
+  }
+  win.document.write(billingInvoiceHTML(month));
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 250);
+}
 
 function settingsRestaurantTab() {
   return `
@@ -2359,8 +3063,40 @@ function settingsRestaurantTab() {
     </section>`;
 }
 
+function settingsBillingTab() {
+  const months = billingMonths();
+  const plusActive = hasHavikoPlusAccess();
+  return `
+    <section class="section">
+      <header class="section-header"><h2>Abrechnung</h2><span class="badge ${plusActive ? "green" : ""}">${escapeHTML(havikoPlusStatusTitle())}</span></header>
+      <div class="section-body">
+        <div class="compact-list">
+          ${settingStatus("Konto erstellt", formatDate(accountCreatedDate(), { dateStyle: "long" }), true)}
+          ${settingStatus("Tarif", plusActive ? "Haviko+" : "Free", plusActive)}
+          ${settingStatus("Monatlicher Betrag", formatCurrency(HAVIKO_PLUS_MONTHLY_PRICE), true)}
+        </div>
+        <table class="data-table">
+          <thead><tr><th>Monat</th><th>Status</th><th>Betrag</th><th>Rechnung</th><th></th></tr></thead>
+          <tbody>
+            ${months.map((month) => `
+              <tr>
+                <td><strong>${escapeHTML(month.label)}</strong></td>
+                <td><span class="badge ${month.status === "Haviko+" ? "green" : ""}">${escapeHTML(month.status)}</span></td>
+                <td>${formatCurrency(month.amount)}</td>
+                <td>${escapeHTML(billingInvoiceNumber(month))}</td>
+                <td><button class="row-button" type="button" data-action="download-billing-invoice" data-month="${escapeHTML(month.key)}">PDF</button></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+        <p class="field-hint">Die Monatsabrechnungen werden aus Kontoerstellung und Haviko+ Status erzeugt. Solange Haviko+ nicht aktiv ist, beträgt der Monatsbetrag 0,00 €.</p>
+      </div>
+    </section>`;
+}
+
 function settingsBetriebTab() {
   const cashDay = activeCashDay();
+  const movements = cashMovementsForSession(cashDay);
+  const expectedCash = expectedCashForSession(cashDay);
   return `
     <section class="section">
       <header class="section-header"><h2>Betriebstag</h2>${cashDay ? `<span class="badge ${sameDay(cashDay.businessDate) ? "green" : "warning"}">${sameDay(cashDay.businessDate) ? "Heute geöffnet" : "Vortag offen"}</span>` : `<span class="badge">Geschlossen</span>`}</header>
@@ -2370,7 +3106,24 @@ function settingsBetriebTab() {
             ${settingStatus("Geschäftsdatum", formatDate(cashDay.businessDate, { dateStyle: "long" }), sameDay(cashDay.businessDate))}
             ${settingStatus("Geöffnet von", cashDay.openedBy || app.workspace.displayName, true)}
             ${settingStatus("Startbestand", formatCurrency(cashDay.openingFloat), true)}
+            ${settingStatus("Barumsatz", formatCurrency(cashRevenueForSession(cashDay)), true)}
+            ${settingStatus("Kassenbewegungen", formatCurrency(netCashMovementsForSession(cashDay)), true)}
+            ${settingStatus("Aktueller Sollbestand", formatCurrency(expectedCash), true)}
           </div>
+          <form id="cash-movement-form">
+            <label class="field"><span>Bewegungsart</span><select id="cash-movement-kind">
+              <option value="deposit">Bareinlage</option>
+              <option value="withdrawal">Barentnahme</option>
+            </select></label>
+            <label class="field"><span>Betrag</span><input id="cash-movement-amount" type="number" min="0.01" step="0.01" required></label>
+            <label class="field"><span>Notiz</span><input id="cash-movement-note" maxlength="160" placeholder="Optional"></label>
+            <button class="secondary" type="submit">Kassenbewegung buchen</button>
+          </form>
+          ${movements.length ? `<div class="compact-list">${movements.slice(0, 8).map((movement) => `
+            <div class="compact-row no-icon">
+              <div class="activity-copy"><strong>${escapeHTML(movementTitle(movement.kind))}</strong><span>${formatDate(movement.createdAt)}${movement.note ? ` · ${escapeHTML(movement.note)}` : ""}</span></div>
+              <strong>${movement.kind === "deposit" ? "+" : "-"}${formatCurrency(movement.amount)}</strong>
+            </div>`).join("")}</div>` : ""}
           <form id="cash-day-close-form">
             <label class="field"><span>Gezählter Kassenbestand</span><input id="cash-day-actual" type="number" min="0" step="0.01" required></label>
             <label class="field"><span>Abschlussnotiz</span><textarea id="cash-day-note"></textarea></label>
@@ -2521,6 +3274,7 @@ function renderSettings() {
   const tab = SETTINGS_TABS.some((item) => item.id === app.settingsTab) ? app.settingsTab : "restaurant";
   const panels = {
     restaurant: settingsRestaurantTab,
+    billing: settingsBillingTab,
     betrieb: settingsBetriebTab,
     reservierung: settingsReservierungTab,
     kundenbindung: settingsKundenbindungTab,
@@ -2681,7 +3435,7 @@ function renderFiscalStatusSection() {
   return `
     ${rows}
     ${settingStatus("Belege (Server)", String(status.receiptCount || 0), status.exportReady)}
-    <p class="field-hint">Vorbereitete DSFinV-K-Dateistruktur, noch keine geprüfte oder zertifizierte DSFinV-K-Kasse.</p>
+    <p class="field-hint">Vorbereitete DSFinV-K-Dateistruktur inkl. Kassenbewegungen, noch keine geprüfte oder zertifizierte DSFinV-K-Kasse.</p>
     <button class="secondary" type="button" data-action="export-dsfinvk" ${status.exportReady ? "" : "disabled"}>DSFinV-K-Export herunterladen</button>
   `;
 }
@@ -3368,14 +4122,29 @@ async function openCashDay(event) {
   event.preventDefault();
   const openingFloat = Number($("cash-day-float")?.value || 0);
   if (openingFloat < 0 || activeCashDay()) return;
+  // Opens the SAME real cash_day_sessions row the App and the fiscal
+  // backend use (open_cash_day RPC) instead of only writing a client-made
+  // id into the shared JSON blob - a blob-only session had no server-side
+  // row at all, so TSE receipts referencing it and the DSFinV-K export
+  // (which reads the real table) would silently disagree with what the
+  // dashboard showed as "open".
+  let session;
+  try {
+    session = await rpc("open_cash_day", {
+      p_restaurant_id: app.workspace.restaurantId,
+      p_opening_float: openingFloat
+    });
+  } catch (error) {
+    toast("Nicht geöffnet", friendlyError(error), "error");
+    return;
+  }
   const sessions = structuredClone(app.data.cashDaySessions || []);
-  const now = new Date();
   sessions.unshift({
-    id: uuid(),
-    businessDate: swiftDate(new Date(now.getFullYear(), now.getMonth(), now.getDate())),
-    openedAt: swiftDate(now),
-    openedBy: app.workspace.displayName,
-    openingFloat,
+    id: session.id,
+    businessDate: swiftDate(new Date(session.business_date)),
+    openedAt: swiftDate(new Date(session.opened_at)),
+    openedBy: session.opened_by_name || app.workspace.displayName,
+    openingFloat: Number(session.opening_float),
     status: "open",
     closedAt: null,
     closedBy: null,
@@ -3384,6 +4153,47 @@ async function openCashDay(event) {
     closingNote: ""
   });
   if (await savePatch({ cashDaySessions: sessions }, "Betriebstag wurde geöffnet.")) renderSettings();
+}
+
+async function recordCashMovement(event) {
+  event.preventDefault();
+  const session = activeCashDay();
+  const kind = $("cash-movement-kind")?.value;
+  const amount = Number($("cash-movement-amount")?.value);
+  const note = $("cash-movement-note")?.value.trim() || "";
+  if (!session || !["deposit", "withdrawal"].includes(kind) || !Number.isFinite(amount) || amount <= 0) {
+    toast("Nicht gebucht", "Prüfe Bewegungsart und Betrag.", "error");
+    return;
+  }
+  const idempotencyKey = `web-cash-movement-${uuid()}`;
+  let remoteMovement;
+  try {
+    remoteMovement = await rpc("record_cash_movement", {
+      p_restaurant_id: app.workspace.restaurantId,
+      p_cash_day_session_id: session.id,
+      p_kind: kind,
+      p_amount: amount,
+      p_note: note,
+      p_idempotency_key: idempotencyKey
+    });
+  } catch (error) {
+    toast("Nicht gebucht", friendlyError(error), "error");
+    return;
+  }
+  const movements = structuredClone(app.data.cashMovements || []);
+  const movementID = remoteMovement?.id || idempotencyKey.replace("web-cash-movement-", "");
+  if (!movements.some((movement) => movement.id === movementID)) {
+    movements.push({
+      id: movementID,
+      cashDaySessionID: remoteMovement?.cash_day_session_id || session.id,
+      kind: remoteMovement?.kind || kind,
+      amount: Number(remoteMovement?.amount || amount),
+      note: remoteMovement?.note || note,
+      createdBy: remoteMovement?.created_by_name || app.workspace.displayName,
+      createdAt: remoteMovement?.created_at ? swiftDate(new Date(remoteMovement.created_at)) : swiftDate()
+    });
+  }
+  if (await savePatch({ cashMovements: movements }, "Kassenbewegung wurde gebucht.")) renderSettings();
 }
 
 async function closeCashDay(event) {
@@ -3396,17 +4206,42 @@ async function closeCashDay(event) {
     toast("Nicht abgeschlossen", "Prüfe den gezählten Kassenbestand.", "error");
     return;
   }
-  const openedAt = dateFromSwift(session.openedAt);
-  const cashMethodIDs = new Set(
-    app.data.paymentMethods.filter((method) => method.kind === "Bar").map((method) => method.id)
-  );
-  const cashRevenue = app.data.paymentRecords
-    .filter((payment) => cashMethodIDs.has(payment.methodID) && dateFromSwift(payment.createdAt) >= openedAt)
-    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const closingIssues = cashDayClosingIssues();
+  if (closingIssues.length) {
+    toast("Nicht abgeschlossen", closingIssues.join(" · "), "error");
+    return;
+  }
+  let expectedCash = expectedCashForSession(session);
+  try {
+    const closedSession = await rpc("close_cash_day", {
+      p_restaurant_id: app.workspace.restaurantId,
+      p_cash_day_session_id: session.id,
+      p_expected_cash: expectedCash,
+      p_actual_cash: actualCash,
+      p_note: note
+    });
+    expectedCash = Number(closedSession?.expected_cash ?? expectedCash);
+  } catch (error) {
+    // A session opened before this fix (or opened by a still-older client)
+    // may have no matching real server-side row at all. Rather than
+    // blocking closing entirely, fall back to the blob-only close so the
+    // day can still be closed - but say so plainly, since that record then
+    // has no real fiscal backing (no audit event, no DSFinV-K visibility).
+    if (String(error?.message || "").includes("No open cash day session found")) {
+      toast(
+        "Ohne Server-Beleg abgeschlossen",
+        "Für diesen Betriebstag gab es keinen echten Datensatz beim fiskalischen Backend (vermutlich vor diesem Fix geöffnet). Er wurde nur lokal abgeschlossen - das entspricht NICHT den DSFinV-K-Anforderungen für diesen Tag.",
+        "error"
+      );
+    } else {
+      toast("Nicht abgeschlossen", friendlyError(error), "error");
+      return;
+    }
+  }
   session.status = "closed";
   session.closedAt = swiftDate();
   session.closedBy = app.workspace.displayName;
-  session.expectedCash = Number(session.openingFloat || 0) + cashRevenue;
+  session.expectedCash = expectedCash;
   session.actualCash = actualCash;
   session.closingNote = note;
   if (await savePatch({ cashDaySessions: sessions }, "Betriebstag wurde abgeschlossen.")) renderSettings();
@@ -3477,6 +4312,7 @@ function openMemberEditor(memberID = null) {
         <label class="field"><span>Rolle</span><select id="member-role"><option ${role === "Restaurantleitung" ? "selected" : ""}>Restaurantleitung</option><option ${role === "Service" ? "selected" : ""}>Service</option><option ${role === "Management" ? "selected" : ""}>Management</option><option ${role === "Küche" ? "selected" : ""}>Küche</option><option ${role === "Bar" ? "selected" : ""}>Bar</option></select></label>
         <label class="field"><span>${member ? "Neues Passwort (optional)" : "Startpasswort"}</span><input id="member-password" type="password" minlength="8" autocomplete="new-password" ${member ? "" : "required"}></label>
         <label class="field"><span>Telefon</span><input id="member-phone" type="tel" value="${escapeHTML(member?.phone || "")}"></label>
+        <label class="check"><input id="member-active" type="checkbox" ${member?.isActive !== false ? "checked" : ""}><span>Zugang ist aktiv</span></label>
         <p class="field-hint">Der Name ist gleichzeitig der eindeutige Anmeldename. Groß- und Kleinschreibung werden nicht unterschieden. Das Passwort wird ausschließlich als sicherer Hash gespeichert.</p>
         <div id="member-permission-editor">${permissionEditorHTML(member, role)}</div>
       </form>
@@ -3574,10 +4410,25 @@ async function saveMember() {
     role: roleTitle,
     phone: $("member-phone").value.trim(),
     username: $("member-name").value.trim(),
+    isActive: $("member-active")?.checked !== false,
     permissions: roleTitle === "Restaurantleitung"
       ? defaultPermissions(roleTitle)
       : [...form.querySelectorAll("#member-permissions input:checked")].map((input) => input.value)
   };
+  if (memberID && String(previousLoginName).localeCompare(String(app.workspace.username), "de", { sensitivity: "base" }) === 0 && member.isActive === false) {
+    toast("Nicht gespeichert", "Du kannst deinen eigenen Zugang nicht deaktivieren.", "error");
+    return;
+  }
+  const nextTeam = memberID
+    ? app.data.team.map((item) => item.id === memberID ? member : item)
+    : [...app.data.team, member];
+  const activeManagers = nextTeam.filter((item) =>
+    item.role === "Restaurantleitung" && item.isActive !== false
+  ).length;
+  if (activeManagers === 0) {
+    toast("Nicht gespeichert", "Mindestens eine aktive Restaurantleitung muss erhalten bleiben.", "error");
+    return;
+  }
   if (app.data.team.some((item) =>
     item.id !== memberID &&
     String(item.name).localeCompare(member.name, "de", { sensitivity: "base" }) === 0
@@ -3613,10 +4464,7 @@ async function saveMember() {
       member_username: member.username,
       is_enabled: member.permissions.includes("editOwnProfile")
     });
-    const team = memberID
-      ? app.data.team.map((item) => item.id === memberID ? member : item)
-      : [...app.data.team, member];
-    if (await savePatch({ team }, memberID ? "Mitarbeiter wurde aktualisiert." : "Mitarbeiterzugang wurde erstellt.")) closeModal();
+    if (await savePatch({ team: nextTeam }, memberID ? "Mitarbeiter wurde aktualisiert." : "Mitarbeiterzugang wurde erstellt.")) closeModal();
   } catch (error) {
     toast("Zugang nicht gespeichert", friendlyError(error), "error");
   }
@@ -4104,6 +4952,14 @@ function handleViewClick(event) {
   if (reservationID) return openReservationEditor(reservationID);
   const productID = event.target.closest("[data-product-id]")?.dataset.productId;
   if (productID) return openProductEditor(productID);
+  const counterProductID = event.target.closest("[data-counter-product-id]")?.dataset.counterProductId;
+  if (counterProductID) return addCounterProduct(counterProductID);
+  const counterIncID = event.target.closest("[data-counter-inc-id]")?.dataset.counterIncId;
+  if (counterIncID) return updateCounterCartItem(counterIncID, 1);
+  const counterDecID = event.target.closest("[data-counter-dec-id]")?.dataset.counterDecId;
+  if (counterDecID) return updateCounterCartItem(counterDecID, -1);
+  const counterRemoveID = event.target.closest("[data-counter-remove-id]")?.dataset.counterRemoveId;
+  if (counterRemoveID) return removeCounterCartItem(counterRemoveID);
   const stationID = event.target.closest("[data-station-id]")?.dataset.stationId;
   if (stationID) return openStationEditor(stationID);
   const printerID = event.target.closest("[data-printer-id]")?.dataset.printerId;
@@ -4120,6 +4976,18 @@ function handleViewClick(event) {
   if (shiftReportID) return openShiftReport(shiftReportID);
   const receiptID = event.target.closest("[data-receipt-id]")?.dataset.receiptId;
   if (receiptID) return openReceiptDetail(receiptID);
+  const voucherID = event.target.closest("[data-voucher-id]")?.dataset.voucherId;
+  if (voucherID) return openVoucherDetail(voucherID);
+  const blockedPeriodID = event.target.closest("[data-blocked-period-remove]")?.dataset.blockedPeriodRemove;
+  if (blockedPeriodID) return removeBlockedPeriod(blockedPeriodID);
+  const billingMonth = event.target.closest("[data-action='download-billing-invoice']")?.dataset.month;
+  if (billingMonth) return downloadBillingInvoice(billingMonth);
+  const counterCategory = event.target.closest("[data-counter-category]")?.dataset.counterCategory;
+  if (counterCategory) {
+    app.counterCategory = counterCategory;
+    renderCounter();
+    return;
+  }
   const area = event.target.closest("[data-area]")?.dataset.area;
   if (area) {
     app.tableArea = area;
@@ -4167,6 +5035,10 @@ function handleViewClick(event) {
   if (action === "add-reservation") openReservationEditor();
   if (action === "add-product") openProductEditor();
   if (action === "manage-categories") openCategoryManager();
+  if (action === "counter-checkout") openCounterCheckout();
+  if (action === "voucher-settings") openVoucherSettings();
+  if (action === "save-availability") saveAvailability();
+  if (action === "add-blocked-period") openBlockedPeriodEditor();
   if (action === "add-member") openMemberEditor();
   if (action === "add-device") openDeviceEditor();
   if (action === "add-station") openStationEditor();
@@ -4218,6 +5090,9 @@ function handleModalClick(event) {
   }
   if (action === "remove-product-option") target.closest(".option-editor")?.remove();
   if (action === "delete-product") deleteProduct(id);
+  if (action === "toggle-voucher" && id) toggleVoucher(id);
+  if (action === "save-voucher-settings") saveVoucherSettings();
+  if (action === "save-blocked-period") saveBlockedPeriod();
   if (action === "save-member") saveMember();
   if (action === "delete-member") deleteMember(id);
   if (action === "save-device") saveDevice();
@@ -4356,9 +5231,19 @@ function switchAuth(mode) {
 }
 
 function updateOnlineStatus() {
-  $("offline-banner").classList.toggle("hidden", navigator.onLine);
-  if (!navigator.onLine) setSyncState("error", "Offline");
-  else if (app.workspace) setSyncState("ready", "Aktuell");
+  const banner = $("offline-banner");
+  if (!navigator.onLine) {
+    const queueLength = queuedMutations().filter((item) => item.restaurantID === app.workspace?.restaurantId).length;
+    banner.textContent = queueLength
+      ? `${queueLength} Änderung${queueLength === 1 ? "" : "en"} warten auf Synchronisierung.`
+      : "Offline - Änderungen werden vorgemerkt und bei Wiederverbindung synchronisiert.";
+    banner.classList.remove("hidden");
+    setSyncState("error", "Offline");
+  } else {
+    banner.classList.add("hidden");
+    if (app.workspace) setSyncState("ready", "Aktuell");
+    flushQueuedMutations();
+  }
 }
 
 async function start() {
@@ -4374,6 +5259,7 @@ async function start() {
     app.session = stored;
     await ensureSession();
     await loadWorkspace(readLastRestaurant());
+    await flushQueuedMutations();
     redirectToDashboardIfOnLoginHost();
   } catch {
     clearSession();
@@ -4407,6 +5293,7 @@ $("view").addEventListener("change", (event) => {
 });
 $("view").addEventListener("submit", (event) => {
   if (event.target.id === "cash-day-open-form") openCashDay(event);
+  if (event.target.id === "cash-movement-form") recordCashMovement(event);
   if (event.target.id === "cash-day-close-form") closeCashDay(event);
   if (event.target.id === "business-settings-form") saveBusinessSettings(event);
   if (event.target.id === "loyalty-settings-form") saveLoyaltySettings(event);
@@ -4490,6 +5377,12 @@ async function checkMaintenanceMode() {
     showIncidentBanner(status);
     return active;
   } catch {
+    if (navigator.onLine) {
+      const banner = $("offline-banner");
+      banner.textContent = "Haviko-Backend nicht erreichbar - Änderungen bitte erst nach Wiederverbindung ausführen.";
+      banner.classList.remove("hidden");
+      setSyncState("error", "Backend nicht erreichbar");
+    }
     return false;
   }
 }

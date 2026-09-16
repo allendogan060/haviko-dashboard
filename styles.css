@@ -759,6 +759,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 .product-card p { margin: 5px 0 15px; color: var(--muted); font-size: 12px; }
 .product-card strong { font-size: 18px; }
 .product-card footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.counter-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
+.equal-tile-grid { grid-auto-rows: 1fr; }
+.counter-product-card {
+  width: 100%;
+  min-height: 168px;
+  display: grid;
+  align-content: space-between;
+  text-align: left;
+  cursor: pointer;
+}
+.counter-product-card:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(8,55,45,0.09); }
 
 .empty-state { min-height: 280px; display: grid; place-items: center; align-content: center; padding: 30px; text-align: center; }
 .empty-mark { width: 48px; height: 48px; border-radius: 10px; object-fit: cover; }
@@ -860,6 +871,7 @@ dialog::backdrop { background: rgba(7,28,23,0.52); backdrop-filter: blur(3px); }
     overscroll-behavior-inline: contain;
   }
   .product-grid { grid-template-columns: 1fr; }
+  .counter-layout { grid-template-columns: 1fr; }
 
   .mobile-navigation {
     position: fixed;
