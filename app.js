@@ -5690,17 +5690,5 @@ updateOnlineStatus();
   setInterval(checkMaintenanceMode, 30000);
   setInterval(checkSessionStillValid, 30000);
   if (underMaintenance) return;
-  // access.js (loaded in <head>, before this module runs) is the real gate -
-  // it already redirects unauthorized visitors away. This check is a
-  // defense-in-depth fallback in case app.js is ever loaded on its own.
-  if (
-    !DEVELOPMENT_MODE ||
-    readCookie("haviko_preview_access") === "granted"
-  ) {
-    start();
-  } else {
-    window.location.replace(
-      `https://autorisieren.haviko.de/?next=${encodeURIComponent(window.location.href)}`
-    );
-  }
+  start();
 })();
