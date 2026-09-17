@@ -51,7 +51,8 @@ const app = {
   loading: false,
   isLoggingOut: false,
   isFlushingQueue: false,
-  fiscalStatus: null
+  fiscalStatus: null,
+  showAllStaffingSuggestions: false
 };
 
 const roleTitles = {
@@ -2360,14 +2361,22 @@ function renderShifts() {
     </div>
     ${canManage() ? (() => {
       const suggestions = staffingSuggestions();
-      return suggestions.length ? `
+      if (!suggestions.length) return "";
+      const visible = app.showAllStaffingSuggestions ? suggestions : suggestions.slice(0, 2);
+      return `
         <section class="section"><header class="section-header"><h2>Dienstplan-Vorschläge</h2></header><div class="section-body compact-list">
-          ${suggestions.map((suggestion) => `
+          ${visible.map((suggestion) => `
             <div class="compact-row no-icon"><div class="activity-copy">
               <strong>${suggestion.date.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "short" })}</strong>
               <span>Ø ${Math.round(suggestion.average)} Gäste (letzte ${suggestion.weeksSampled} Wochen) · Vorschlag: ${suggestion.suggestedStaff} im Dienst, aktuell ${suggestion.plannedStaff} geplant${suggestion.average < 15 && suggestion.plannedStaff > suggestion.suggestedStaff ? " · Ruhiger Tag – Personal reduzieren oder früher schließen erwägen." : ""}</span>
             </div></div>`).join("")}
-        </div></section>` : "";
+          ${suggestions.length > 2 ? `
+            <div class="tool-actions">
+              <button class="quiet" type="button" data-action="toggle-staffing-suggestions">
+                ${app.showAllStaffingSuggestions ? "Weniger anzeigen" : `Alle anzeigen (${suggestions.length})`}
+              </button>
+            </div>` : ""}
+        </div></section>`;
     })() : ""}
     ${canManage() ? renderScheduleGrid() : `
     <section class="section table-section">
@@ -5388,6 +5397,10 @@ function handleViewClick(event) {
   if (action === "add-printer") openPrinterEditor();
   if (action === "save-operating-mode") saveKitchenOperatingMode();
   if (action === "plan-shift") openScheduledShiftEditor();
+  if (action === "toggle-staffing-suggestions") {
+    app.showAllStaffingSuggestions = !app.showAllStaffingSuggestions;
+    render();
+  }
   if (action === "start-shift") shiftAction("start");
   if (action === "toggle-break") shiftAction("break");
   if (action === "end-shift") shiftAction("end");
