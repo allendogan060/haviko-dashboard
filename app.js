@@ -451,9 +451,14 @@ function readCookie(name) {
 }
 
 function readStoredSession() {
+  // The shared Domain=.haviko.de cookie is the ONLY source read here on
+  // purpose - localStorage is per-subdomain, so a session/logout on
+  // login.haviko.de can never reach dashboard.haviko.de's own copy of it.
+  // Trusting a per-origin localStorage copy as a fallback let a stale,
+  // already-logged-out session on one subdomain keep looking valid on the
+  // other forever, which was the direct cause of the login<->dashboard
+  // infinite-redirect loop right after logging out.
   try {
-    const local = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
-    if (local?.access_token || local?.refresh_token) return local;
     return JSON.parse(readCookie(SHARED_SESSION_COOKIE) || "null");
   } catch {
     return null;
@@ -468,7 +473,9 @@ function saveLastRestaurant(restaurantID) {
 }
 
 function readLastRestaurant() {
-  return localStorage.getItem(LAST_RESTAURANT_KEY) || readCookie(SHARED_RESTAURANT_COOKIE);
+  // Same reasoning as readStoredSession(): the shared cookie only, so both
+  // subdomains always agree.
+  return readCookie(SHARED_RESTAURANT_COOKIE);
 }
 
 function clearSession() {
