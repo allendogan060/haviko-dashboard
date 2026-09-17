@@ -428,9 +428,17 @@ async function rpc(name, parameters = {}) {
 
 function saveSession(session) {
   app.session = session;
-  sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  const sharedSession = {
+    access_token: session?.access_token,
+    refresh_token: session?.refresh_token,
+    expires_at: session?.expires_at,
+    expires_in: session?.expires_in,
+    token_type: session?.token_type
+  };
   document.cookie =
-    `${SHARED_SESSION_COOKIE}=; Max-Age=0; Path=/; Domain=.haviko.de; Secure; SameSite=Lax`;
+    `${SHARED_SESSION_COOKIE}=${encodeURIComponent(JSON.stringify(sharedSession))}; ` +
+    "Max-Age=2592000; Path=/; Domain=.haviko.de; Secure; SameSite=Lax";
 }
 
 function readCookie(name) {
@@ -444,8 +452,9 @@ function readCookie(name) {
 
 function readStoredSession() {
   try {
-    const session = JSON.parse(sessionStorage.getItem(AUTH_STORAGE_KEY) || "null");
-    return (session?.access_token || session?.refresh_token) ? session : null;
+    const local = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
+    if (local?.access_token || local?.refresh_token) return local;
+    return JSON.parse(readCookie(SHARED_SESSION_COOKIE) || "null");
   } catch {
     return null;
   }
@@ -466,7 +475,7 @@ function clearSession() {
   app.session = null;
   app.workspace = null;
   app.data = null;
-  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem(AUTH_STORAGE_KEY);
   localStorage.removeItem(LAST_RESTAURANT_KEY);
   document.cookie =
     `${SHARED_SESSION_COOKIE}=; Max-Age=0; Path=/; Domain=.haviko.de; Secure; SameSite=Lax`;
