@@ -43,7 +43,6 @@ const app = {
   counterCart: [],
   counterCategory: "Alle",
   appearanceMode: localStorage.getItem("haviko-appearance-mode") || "System",
-  chatKind: "direct",
   chatConversations: [],
   chatMessages: [],
   chatConversationID: null,
@@ -1543,10 +1542,11 @@ function renderTableGrid(tables) {
       const seatedReservation = table.status === "besetzt"
         ? app.data.reservations.find((item) => item.tableID === table.id && item.status === "Platziert")
         : null;
+      const isFree = table.status === "frei";
       return `
-        <button class="table-tile" type="button" data-table-id="${table.id}"
-          style="--table-color:${tableStatusColor(table.status)};--status-color:${tableStatusColor(table.status)}">
-          <span class="status-dot"></span>
+        <button class="table-tile ${isFree ? "is-free" : ""}" type="button" data-table-id="${table.id}"
+          ${isFree ? "" : `style="--table-color:${tableStatusColor(table.status)};--status-color:${tableStatusColor(table.status)}"`}>
+          ${isFree ? "" : `<span class="status-dot"></span>`}
           <div>
             <h3>${escapeHTML(table.number ? `${table.name} · ${table.number}` : table.name)}</h3>
             <p>${escapeHTML(table.area)} · ${escapeHTML(table.status)}</p>
@@ -1614,7 +1614,7 @@ function renderOrders() {
   const forecast = kitchenLoadForecast();
   $("view").innerHTML = `
     <div class="page-tools">
-      <div><h2>Küchen- und Servicebons</h2><p>Statusänderungen sind sofort für App und Web sichtbar.</p></div>
+      <div><h2>Küchen- und Servicebons</h2><p>Aktuelle Bestellungen aus Küche und Service.</p></div>
       ${routeAllowed("tables") ? `<button class="secondary" type="button" data-route="tables">Tisch auswählen</button>` : ""}
     </div>
     ${forecast ? `<div class="compact-row no-icon" style="background:var(--orange-soft, #fff0e8);border-radius:var(--radius, 8px);padding:12px 14px;margin-bottom:16px;"><div class="activity-copy"><strong>${escapeHTML(forecast)}</strong></div></div>` : ""}
@@ -1661,7 +1661,7 @@ function renderCounter() {
   const fiscalReady = app.data.fiscalizationState === "ready" || app.data.fiscalizationState === "testMode";
   $("view").innerHTML = `
     <div class="page-tools">
-      <div><h2>Theke</h2><p>Schnellverkauf mit denselben Produkten, Preisen und Zahlungsarten wie in der App.</p></div>
+      <div><h2>Theke</h2><p>Schnellverkauf für Laufkundschaft.</p></div>
       <div class="tool-actions">
         <span class="badge ${cashDay ? "green" : "orange"}">${cashDay ? "Kassentag offen" : "Kassentag geschlossen"}</span>
         <span class="badge ${fiscalReady ? "green" : "orange"}">${fiscalReady ? "Fiskal bereit" : "Fiskal offen"}</span>
@@ -1718,7 +1718,7 @@ function renderVouchers() {
   const configuration = app.data.voucherConfiguration || {};
   $("view").innerHTML = `
     <div class="page-tools">
-      <div><h2>Gutscheine</h2><p>Gutscheinbestand, Restwerte und Codeformat wie in der App.</p></div>
+      <div><h2>Gutscheine</h2><p>Gutscheinbestand, Restwerte und Codeformat.</p></div>
       <div class="tool-actions"><button class="secondary" type="button" data-action="voucher-settings">Codeformat</button></div>
     </div>
     <div class="metric-grid">
@@ -1916,7 +1916,7 @@ function renderAvailability() {
   });
   $("view").innerHTML = `
     <div class="page-tools">
-      <div><h2>Verfügbarkeit</h2><p>Online-Buchungszeiten, Vorlauf und Sperrzeiten wie in der App.</p></div>
+      <div><h2>Verfügbarkeit</h2><p>Online-Buchungszeiten, Vorlauf und Sperrzeiten.</p></div>
       <div class="tool-actions"><button class="primary" type="button" data-action="save-availability">Speichern</button></div>
     </div>
     <section class="section">
@@ -2401,10 +2401,18 @@ function renderShifts() {
 async function renderTeamChat() {
   $("view").innerHTML = emptyHTML("Chat wird geladen", "Konversationen werden aus Haviko geladen.");
   try {
-    const conversations = await rpc("list_chat_conversations", {
-      p_restaurant_id: app.workspace.restaurantId,
-      p_kind: app.chatKind
-    }) || [];
+    // Direkt- und Gruppenchats sind eine gemeinsame Übersicht - beide Arten
+    // laden und nach letzter Nachricht sortiert zusammenführen, statt sie
+    // hinter einem Umschalter zu trennen.
+    const [direct, group] = await Promise.all([
+      rpc("list_chat_conversations", { p_restaurant_id: app.workspace.restaurantId, p_kind: "direct" }),
+      rpc("list_chat_conversations", { p_restaurant_id: app.workspace.restaurantId, p_kind: "group" })
+    ]);
+    const conversations = [...(direct || []), ...(group || [])].sort((a, b) => {
+      const aTime = new Date(a.last_message_at || a.lastMessageAt || 0).getTime();
+      const bTime = new Date(b.last_message_at || b.lastMessageAt || 0).getTime();
+      return bTime - aTime;
+    });
     app.chatConversations = conversations;
     if (!app.chatConversationID && conversations.length) app.chatConversationID = conversations[0].id;
     if (!conversations.some((item) => item.id === app.chatConversationID)) app.chatConversationID = conversations[0]?.id || null;
@@ -2440,11 +2448,7 @@ async function renderTeamChat() {
   const selected = app.chatConversations.find((item) => item.id === app.chatConversationID);
   $("view").innerHTML = `
     <div class="page-tools">
-      <div><h2>Chat</h2><p>Direkt- und Gruppenchats über dieselben Haviko-RPCs wie in der App.</p></div>
-      <div class="tool-actions">
-        <button class="secondary ${app.chatKind === "direct" ? "selected" : ""}" type="button" data-chat-kind="direct">Direkt</button>
-        <button class="secondary ${app.chatKind === "group" ? "selected" : ""}" type="button" data-chat-kind="group">Gruppen</button>
-      </div>
+      <div><h2>Chat</h2></div>
     </div>
     <div class="chat-layout">
       <section class="section">
@@ -2461,7 +2465,7 @@ async function renderTeamChat() {
         <header class="section-header"><h2>${selected ? escapeHTML(titleFor(selected)) : "Nachrichten"}</h2></header>
         <div class="section-body">
           ${selected ? `
-            <div class="message-list">
+            <div class="message-list" id="message-list">
               ${app.chatMessages.length ? app.chatMessages.map((message) => {
                 const sender = message.sender_username || message.senderUsername || "";
                 const mine = String(sender).toLowerCase() === String(currentUsername).toLowerCase();
@@ -2480,6 +2484,8 @@ async function renderTeamChat() {
       </section>
     </div>
   `;
+  const messageList = $("message-list");
+  if (messageList) messageList.scrollTop = messageList.scrollHeight;
 }
 
 async function sendChatMessage(event) {
@@ -3062,7 +3068,7 @@ function renderInbox() {
   );
   $("view").innerHTML = `
     <div class="page-tools">
-      <div><h2>Postfach</h2><p>Mitteilungen aus App und Betrieb, dieselben wie im Postfach der App.</p></div>
+      <div><h2>Postfach</h2><p>Mitteilungen aus App und Betrieb.</p></div>
     </div>
     ${notifications.length ? `<section class="section">
       <div class="activity-list">
@@ -5316,13 +5322,6 @@ function handleViewClick(event) {
   if (voucherID) return openVoucherDetail(voucherID);
   const blockedPeriodID = event.target.closest("[data-blocked-period-remove]")?.dataset.blockedPeriodRemove;
   if (blockedPeriodID) return removeBlockedPeriod(blockedPeriodID);
-  const chatKind = event.target.closest("[data-chat-kind]")?.dataset.chatKind;
-  if (chatKind) {
-    app.chatKind = chatKind;
-    app.chatConversationID = null;
-    renderTeamChat();
-    return;
-  }
   const chatConversationID = event.target.closest("[data-chat-conversation-id]")?.dataset.chatConversationId;
   if (chatConversationID) {
     app.chatConversationID = chatConversationID;

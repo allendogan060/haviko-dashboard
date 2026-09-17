@@ -546,6 +546,10 @@ a.compact-row:hover, a.activity-row:hover { color: var(--action); }
   text-align: left;
 }
 .table-tile:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(8,55,45,0.09); }
+/* Free tables carry no status to highlight, so they stay plain white
+   instead of getting a colored border/tint and dot like occupied,
+   reserved or cleaning tables do. */
+.table-tile.is-free { border-color: var(--line); background: var(--surface); }
 .table-tile h3 { margin: 0; font-size: 17px; }
 .table-tile p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .table-tile strong { font-size: 14px; }
@@ -809,10 +813,16 @@ a.compact-row:hover, a.activity-row:hover { color: var(--action); }
   cursor: pointer;
 }
 .counter-product-card:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(8,55,45,0.09); }
-.chat-layout { display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.chat-layout { display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 16px; align-items: stretch; height: 70vh; min-height: 420px; }
+.chat-layout > .section { display: flex; flex-direction: column; min-height: 0; }
+.chat-layout > .section > .section-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The conversation list itself is the scrolling region there. */
+.chat-layout > .section:first-child > .section-body { overflow-y: auto; }
 .chat-row { width: 100%; text-align: left; background: white; }
 .chat-row.selected { background: var(--action-soft); }
-.message-list { display: grid; gap: 10px; margin-bottom: 14px; }
+/* Fixed-height scroll window instead of pushing the whole page down - only
+   the message list scrolls, the composer stays pinned right below it. */
+.message-list { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 14px; }
 .message-bubble {
   max-width: min(72ch, 86%);
   display: grid;
