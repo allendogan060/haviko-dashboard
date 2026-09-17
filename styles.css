@@ -260,6 +260,18 @@ input:focus, select:focus, textarea:focus { border-color: var(--action); box-sha
 }
 
 .check input { width: 19px; height: 19px; min-height: 0; margin: 1px 0 0; accent-color: var(--action); }
+/* Any checkbox/radio/toggle not otherwise styled (several settings pages
+   use a bare <input type="checkbox">) falls back to this instead of the
+   browser's native blue accent, so every toggle in the dashboard reads as
+   the same green regardless of which page built it. */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--action); }
+
+/* Plain rows built from <a> (Datenschutz/Support/Impressum links etc. in
+   Einstellungen) had no color of their own, so they fell through to the
+   browser's default blue, underlined link style - inconsistent with every
+   other list row in the dashboard. */
+a.compact-row, a.activity-row { color: var(--ink); text-decoration: none; }
+a.compact-row:hover, a.activity-row:hover { color: var(--action); }
 .field-hint { margin: -5px 0 16px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .form-error { padding: 10px 12px; border: 1px solid #efbdc4; border-radius: 6px; background: var(--red-soft); color: var(--red); font-size: 13px; }
 
